@@ -8,7 +8,7 @@ import logging.handlers
 import traceback
 from typing import Dict as Dict_t, List, Union
 from typing import Any
-from settings import RedisSettings, RedisEntries
+from python_redis_lib.settings import RedisSettings, RedisEntries
 log = logging.getLogger()
 
 BLOCK_DELAY = 0
