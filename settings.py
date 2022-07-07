@@ -21,8 +21,8 @@ from typing import Dict as Dict_t
 from dataclasses import dataclass, field
 import logging
 import logging.handlers
-DELAY_BETWEEN_PROCESSES:float = 0.5
-TOTAL_PROCS_PER_DEVICE = 3
+log = logging.getLogger()
+
 @dataclass
 class ConnectionSettings:
     host: str = "0.0.0.0"
@@ -223,26 +223,20 @@ class ManagerSettings:
     max_queue: int = 5000
 
 class Reader:
-    log = logging.getLogger()
-    config_directory = "conf"
-    registers_file = "registers.toml"
-    config_file = "config.toml"
-    config_dict:Dict_t[str,Dict_t] = {}
-    registers_dict:Dict_t[str,Dict_t[str,Dict_t]] = {}
 
     framer_factory_dict = {"rtu" : RtuFramer, "socket": SocketFramer}
     client_factory_dict = {"udp": ModbusClientUDP, "tcp": ModbusClientTCP, "serial": ModbusClientSerial}
 
     def __init__(self) -> None:
+        self.config_directory = "conf"
+        self.config_file = "config.toml"
         self.read(force=True)
+
     def configPath(self, file: str = ""):
         if not file:
-            file = Reader.config_file
-        return f"{Reader.config_directory}/{file}"
-    def registersPath(self, file: str = ""):
-        if not file:
-            file = Reader.registers_file
-        return f"{Reader.config_directory}/{file}"
+            file = self.config_file
+        return f"{self.config_directory}/{file}"
+
     def setDirectory(self, directory: str):
         if path.exists(directory):
             Reader.config_directory = directory
@@ -253,19 +247,10 @@ class Reader:
         except:
             Reader.log.warn("New directory doesnt contain valid files")
             Reader.log.error(traceback.format_exc())
-    def setRegistersFile(self,file:str):
-        if path.exists(file):
-            Reader.registers_file = file
-        else:
-            Reader.log.warn("Registrers file passed is nonexistent")
-        try:
-            self.read(force=True)
-        except:
-            Reader.log.warn("New registers file isnt valid")
-            Reader.log.error(traceback.format_exc())
+
     def setConfigFile(self, file : str):
         if path.exists(self.configPath(file)):
-            Reader.config_file = file
+            self.config_file = file
         else:
             Reader.log.warn("File passed is nonexistent")
         try:
@@ -275,14 +260,15 @@ class Reader:
             Reader.log.error(traceback.format_exc())
 
     def read(self, force: bool):
-        if force or not Reader.config_dict or not Reader.registers_dict:
-            with open(self.configPath(),"r") as f:
-                Reader.config_dict = toml.load(f)
-            with open(self.registersPath(),"r") as f:
-                Reader.registers_dict = toml.load(f)
-    @staticmethod
-    def parseModbusDevices(devs: List_t[dict], parent_settings: BolidSettings) -> List_t[ModbusDevice]:
-        def parseRegisters(device:ModbusDevice, ranges: List_t[dict]) -> None:
+        if force or not self.config_dict:
+            self.config_dict = self._read()
+
+    def _read(self, file:str = None):
+        with open(self.configPath(file),"r") as f:
+                return toml.load(f)
+
+    def parseModbusDevices(self, devs: List_t[dict], *,  parent_settings: BolidSettings, registers_file = "config.toml") -> List_t[ModbusDevice]:
+        def parseRegisters(device:ModbusDevice, ranges: List_t[dict], registers_file = "config.toml") -> None:
             if ranges:
                 for reg_ranges in ranges:
                     if reg_ranges["type"] == "holding":
@@ -292,9 +278,10 @@ class Reader:
                     else:
                         raise RuntimeError(f"Incorrect type passed in settings {reg_ranges['type']}")
             ########
-            holdings_dict = Reader.registers_dict.get("registers").get(parent_settings.name).get(device.name, {}).get("holding", {})
-            inputs_dict = Reader.registers_dict.get("registers").get(parent_settings.name).get(device.name, {}).get("input", {})
-            write_dict = Reader.registers_dict.get("registers").get(parent_settings.name).get(device.name, {}).get("write", {})
+            registers_dict = self._read(registers_file)
+            holdings_dict = registers_dict.get("registers").get(parent_settings.name).get(device.name, {}).get("holding", {})
+            inputs_dict = registers_dict.get("registers").get(parent_settings.name).get(device.name, {}).get("input", {})
+            write_dict = registers_dict.get("registers").get(parent_settings.name).get(device.name, {}).get("write", {})
             def fillDict(dict_to_fill:dict, source:dict):
                 for key in source:
                     dict_to_fill[key] = source[key]["index"]
@@ -314,14 +301,14 @@ class Reader:
             current.stop_commands = mod_dict.get("stop_commands", current.stop_commands)
             current.parent_name = parent_settings.name
             current.write_queue = asyncio.Queue(parent_settings.max_queries)
-            parseRegisters(current, mod_dict.get("register_ranges"))
+            parseRegisters(current, mod_dict.get("register_ranges"),registers_file)
             result.append(current)
         return result
     
-    def parseBolids(self) -> List_t[BolidSettings]:
+    def parseBolids(self, **kwargs) -> List_t[BolidSettings]:
         result = list()
-        for bol_name in Reader.config_dict["bolid"]:
-            current_bol_dict = Reader.config_dict["bolid"][bol_name]
+        for bol_name in self.config_dict["bolid"]:
+            current_bol_dict = self.config_dict["bolid"][bol_name]
             current = BolidSettings()
             current.name = bol_name
             current.query_handle_delay = current_bol_dict.get("query_handle_delay", current.query_handle_delay)
@@ -333,13 +320,13 @@ class Reader:
             current.framer_type = current_bol_dict.get("protocol", current.framer_type)
             current.framer_factory = Reader.framer_factory_dict.get(current.framer_type)
             current.client_factory = Reader.client_factory_dict.get(current.client_type)
-            current.devices = self.parseModbusDevices(current_bol_dict.get("devices",{}), parent_settings=current)
+            current.devices = self.parseModbusDevices(current_bol_dict.get("devices",{}), parent_settings=current, registers_file=kwargs.get("registers_file"))
             result.append(current)
         return result
 
     def parseManagerSettings(self) -> ManagerSettings:
         result = ManagerSettings()
-        manager_dict = Reader.config_dict.get("manager").get("settings")
+        manager_dict = self.config_dict.get("manager").get("settings")
         result.queue_flush_check_delay = manager_dict.get("queue_flush_check_delay", result.queue_flush_check_delay)
         result.ping_delay = manager_dict.get("ping_delay", result.ping_delay)
         return result
@@ -349,7 +336,7 @@ class Reader:
         if top_dict:
             current_dict = top_dict
         else:
-            current_dict:dict = Reader.config_dict
+            current_dict:dict = self.config_dict
         redis_dict = current_dict.get("redis")
         result.commands_stream = redis_dict.get("commands_stream")
         result.write_delay = redis_dict.get("write_delay")
@@ -370,7 +357,7 @@ class Reader:
         )        
 
     def parseFountains(self) -> List_t[FountainSettings]:
-        fountain_dict = Reader.config_dict.get("fountain")
+        fountain_dict = self.config_dict.get("fountain")
         full_result = []
         for fountain_name, sub_dict in fountain_dict.items():
             result = FountainSettings(
