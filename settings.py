@@ -130,6 +130,10 @@ class RedisSettings:
 
 
 @dataclass
+class NavigardServerSettings:
+    connection: ConnectionSettings
+
+@dataclass
 class OperationMode:
     name: str
     time_per_step: float
@@ -227,9 +231,9 @@ class Reader:
     framer_factory_dict = {"rtu" : RtuFramer, "socket": SocketFramer}
     client_factory_dict = {"udp": ModbusClientUDP, "tcp": ModbusClientTCP, "serial": ModbusClientSerial}
 
-    def __init__(self) -> None:
-        self.config_directory = "conf"
-        self.config_file = "config.toml"
+    def __init__(self, *, dir = "conf", file = "config.toml") -> None:
+        self.config_directory = dir
+        self.config_file = file
         self.read(force=True)
 
     def configPath(self, file: str = ""):
@@ -392,3 +396,15 @@ class Reader:
         return UptimeSettings(
             days, ranges
         ) 
+
+    def parseNavigardServer(self, src: Dict_t[str, Any] = None) -> NavigardServerSettings:
+        if src is None:
+            src = self.config_dict.get("navigard_server")
+        try:
+            host = src.get("connection").get("host")
+            port = src.get("connection").get("port")
+        except:
+            log.error("Connection settings for Navigard Server not provided!")
+            raise
+        connection = ConnectionSettings(host, port)
+        return NavigardServerSettings(connection)
