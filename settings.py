@@ -23,12 +23,12 @@ import logging
 import logging.handlers
 log = logging.getLogger()
 
-@dataclass
+@dataclass (slots=True)
 class ConnectionSettings:
     host: str = "0.0.0.0"
     port: int = 502
 
-@dataclass
+@dataclass (slots=True)
 class ModbusDevice:
     parent: object = None
     parent_name: str = ""
@@ -93,17 +93,35 @@ class ModbusDevice:
     def full_name(self):
         return f"{self.parent_name}:{self.name}"
 
-@dataclass
 class RedisEntries:
-    raw_dict : Dict_t[str,Union[str,int]]
-    stream_id : str
+    def __init__(self, raw_dict:Dict_t[str,Union[str,int]], stream_id : str, *, filter = True) -> None:
+        self.raw_dict = raw_dict
+        self.stream_id = stream_id
+        self.filter = filter
+        base_key = ""
+        try:
+            for key in self.raw_dict:
+                curr_key = key.split(":")[:-1]
+                if not base_key:
+                    base_key = curr_key
+                if base_key!=curr_key:
+                    log.warn(f"Non homogenous hash key while creating Redis Entries! ({base_key} != {curr_key})")
+                    log.warn("Only dict with entries for ONE object (same key, different fields) should be passed!")
+        except:
+            pass
+
     def hashKey(self) -> str:
         for key in self.raw_dict:
-            return f"{self.stream_id}:{':'.join(key.split(':')[:-1])}" 
+            split_key = key.split(':')
+            if len(split_key) == 1:
+                hash_suff = key
+            else:
+                hash_suff = ':'.join(split_key[:-1])
+            return f"{self.stream_id}:{hash_suff}" 
     def items(self):
         return self.raw_dict.items()
 
-@dataclass
+@dataclass (slots=True)
 class BolidSettings:
     connection: ConnectionSettings = ConnectionSettings()
     client_type: str = "udp"
@@ -117,7 +135,7 @@ class BolidSettings:
     query_timeout: float = 0.5
     max_queries:int = 50
     
-@dataclass
+@dataclass (slots=True)
 class RedisSettings:
     commands_stream: str = ""
     output_stream: str = ""
@@ -129,11 +147,11 @@ class RedisSettings:
     max_sub_length: int = 50000 
 
 
-@dataclass
+@dataclass (slots=True)
 class NavigardServerSettings:
     connection: ConnectionSettings
 
-@dataclass
+@dataclass (slots=True)
 class OperationMode:
     name: str
     time_per_step: float
@@ -163,7 +181,7 @@ class OperationMode:
     def reset(self):
         self.current_index = -1
 
-@dataclass
+@dataclass (slots=True)
 class UptimeSettings:
     days: List_t[int]
     time_ranges: List_t[Tuple_t[dt.time, dt.time]]
@@ -181,7 +199,7 @@ class UptimeSettings:
         day_allowed = now_day in self.days
         return any(ranges_result) and day_allowed
 
-@dataclass
+@dataclass (slots=True)
 class ModbusControlSet:
     target_device: str
     spd_register:str
@@ -212,7 +230,7 @@ class ModbusControlSet:
     def off_key(self):
         return f"{self.target_device}:{self.off_field}"
 
-@dataclass
+@dataclass (slots=True)
 class FountainSettings:
     name:str
     control_set:ModbusControlSet
@@ -220,7 +238,7 @@ class FountainSettings:
     op_modes: Dict_t[str,OperationMode] = field(init=False)
     redis: RedisSettings = field(init=False)
 
-@dataclass
+@dataclass (slots=True)
 class ManagerSettings:
     ping_delay: float = 1
     queue_flush_check_delay: float = 2
