@@ -47,7 +47,7 @@ class RedisClient():
         self._write_cb = cb
 
     def run(self):
-        log.info(f"Redis client INPUT_STREAM({self.commands_stream_key}), OUTPUT_STREAM({self.stream_key}) is running!")
+        log.info(f"Redis client INPUT_STREAM ({self.commands_stream_key}), OUTPUT_STREAM ({self.stream_key}) is running!")
         self.ioloop.create_task(self._startLocalSaves())
         self.ioloop.create_task(self._checkConnection())
         self.ioloop.create_task(self._startStreamWriting())

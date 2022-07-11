@@ -150,6 +150,14 @@ class RedisSettings:
 @dataclass (slots=True)
 class NavigardServerSettings:
     connection: ConnectionSettings
+    contact_id_map: Dict_t[str,str]
+    commands_map: List_t[dict]
+    
+    def __post_init__(self):
+        for command in self.commands_map:
+            current = self.commands_map[command]
+            if type(current) != list:
+                self.commands_map[command] = list(current)
 
 @dataclass (slots=True)
 class OperationMode:
@@ -424,5 +432,9 @@ class Reader:
         except:
             log.error("Connection settings for Navigard Server not provided!")
             raise
+        contact_id_mapping = src.get("mappings").get("contact_id")
+        commands_map = src.get("mappings").get("commands")
         connection = ConnectionSettings(host, port)
-        return NavigardServerSettings(connection)
+        return NavigardServerSettings(connection, contact_id_mapping, commands_map)
+
+    
