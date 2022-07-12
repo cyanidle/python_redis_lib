@@ -95,6 +95,9 @@ class ModbusDevice:
 
 class RedisEntries:
     def __init__(self, raw_dict:Dict_t[str,Union[str,int]], stream_id : str, *, filter = True) -> None:
+        if type(raw_dict) != dict:
+            log.error(f"Redis Entries cannot be initialised from non-dict entries! ({raw_dict})")
+            raise TypeError
         self.raw_dict = raw_dict
         self.stream_id = stream_id
         self.filter = filter
@@ -157,7 +160,7 @@ class NavigardServerSettings:
         for command in self.commands_map:
             current = self.commands_map[command]
             if type(current) != list:
-                self.commands_map[command] = list(current)
+                self.commands_map[command] = [current]
 
 @dataclass (slots=True)
 class OperationMode:

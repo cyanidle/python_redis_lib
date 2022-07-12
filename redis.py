@@ -39,8 +39,8 @@ class RedisClient():
         else:
             self._write_cb = write_cb
 
-    def _def_cb(self, command: dict):
-        log.warn(f"Got command from stream {self.commands_stream_key}, but not handled")
+    async def _def_cb(self, command: dict):
+        log.warn(f"Got command from stream {self.commands_stream_key}, but not handled (write callback not set!)")
         log.warn(command)
 
     def setCommandsCallback(self, cb):
@@ -55,9 +55,21 @@ class RedisClient():
         self.ioloop.create_task(self._startTrimming())
 
     async def write(self, info: Dict_t[str,Any]):
+        """
+        A method to be used as a callback to write to redis output Stream
+        in format of dict {<domain:key> : val}.
+
+        Uses cache to filter unchanged entries. Hash key is <output_stream>:<domain> key : val.
+        """
         self.stream_wr_queue.put_nowait(RedisEntries(info,self.stream_key))
 
     async def writeUnfiltered(self, info: Dict_t[str,Any]):
+        """
+        A method to be used as a callback to write to redis output Stream
+        in format of dict {<domain:key> : val}.
+        
+        Does not use filtering
+        """
         self.stream_wr_queue.put_nowait(RedisEntries(info,self.stream_key, filter = False))
 
     async def _startTrimming(self):
@@ -131,25 +143,29 @@ class RedisClient():
             self.shutdown = True
 
     async def processRedisWrQueue(self, entries_q: asyncio.Queue):
-        result = {}
-        hash_key = ""
-        cache = {}
-        while not entries_q.empty():
-            entries:RedisEntries = entries_q.get_nowait()
-            curr_hash_key = entries.hashKey()
-            if hash_key != curr_hash_key:
-                hash_key = curr_hash_key
-                cache = await self.redis.hgetall(hash_key)
-            for key, val in entries.items():
-                split_key = key.split(":")
-                field = split_key[-1]
-                current = cache.get(field)
-                if not current is None and current == str(val) and entries.filter:
-                    continue
-                await self.redis.hset(hash_key, field, val)
-                cache[field] = val
-                result[key] = val
-        return result
+        try:
+            result = {}
+            hash_key = ""
+            cache = {}
+            while not entries_q.empty():
+                entries:RedisEntries = entries_q.get_nowait()
+                curr_hash_key = entries.hashKey()
+                if hash_key != curr_hash_key:
+                    hash_key = curr_hash_key
+                    cache = await self.redis.hgetall(hash_key)
+                for key, val in entries.items():
+                    split_key = key.split(":")
+                    field = split_key[-1]
+                    current = cache.get(field)
+                    if not current is None and current == str(val) and entries.filter:
+                        continue
+                    await self.redis.hset(hash_key, field, val)
+                    cache[field] = val
+                    result[key] = val
+            return result
+        except:
+            log.error("An Error occured while processing write request:")
+            log.error(traceback.format_exc())
 
     async def processRedisWrList(self, entries_list: List[dict]):
         result = {}
@@ -335,7 +351,10 @@ class RedisClient():
                             current_id = StreamId(raw_current_id)
                             if current_id > last_id:
                                 last_id = current_id
-                            await self._write_cb(entry)
+                            try:
+                                await self._write_cb(entry)
+                            except TypeError:
+                                log.error(f"Callback function is not an asyncio coroutine!")
                         ##
                         self.config[self.commands_stream_key] = {"last_id": last_id.raw}
                         self.last_id = last_id
