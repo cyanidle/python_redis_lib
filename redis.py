@@ -89,7 +89,7 @@ class RedisClient():
                 await asyncio.sleep(1)
                 continue
             except asyncio.exceptions.CancelledError:
-                return
+                raise
             except aioredis.exceptions.ResponseError:
                 await asyncio.sleep(60)
                 continue
@@ -115,7 +115,7 @@ class RedisClient():
                 await asyncio.sleep(1)
                 continue
             except asyncio.exceptions.CancelledError:
-                return
+                raise
             except:
                 log.error("Error occured:")
                 log.error(traceback.format_exc())
@@ -203,7 +203,7 @@ class RedisClient():
         except aioredis.exceptions.ConnectionError:
             self.connected = False
         except asyncio.exceptions.CancelledError:
-            return
+            raise
         except:
             log.error("Error occured:")
             log.error(traceback.format_exc())
@@ -222,7 +222,7 @@ class RedisClient():
         except aioredis.exceptions.ConnectionError:
             self.connected = False
         except asyncio.exceptions.CancelledError:
-            return
+            raise
         except:
             log.error("Error occured:")
             log.error(traceback.format_exc())
@@ -240,7 +240,7 @@ class RedisClient():
         except aioredis.exceptions.ConnectionError:
             self.connected = False
         except asyncio.exceptions.CancelledError:
-            return
+            raise
         except:
             log.error("Error occured:")
             log.error(traceback.format_exc())
@@ -259,7 +259,7 @@ class RedisClient():
         except aioredis.exceptions.ConnectionError:
             self.connected = False
         except asyncio.exceptions.CancelledError:
-            return
+            raise
         except:
             log.error("Error occured:")
             log.error(traceback.format_exc())
@@ -279,7 +279,7 @@ class RedisClient():
         except aioredis.exceptions.ConnectionError:
             self.connected = False
         except asyncio.exceptions.CancelledError:
-            return
+            raise
         except:
             log.error("Error occured:")
             log.error(traceback.format_exc())
@@ -312,7 +312,7 @@ class RedisClient():
             except aioredis.exceptions.ConnectionError:
                 self.connected = False
             except asyncio.exceptions.CancelledError:
-                return
+                raise
             except:
                 log.error("Error occured:")
                 log.error(traceback.format_exc())
@@ -328,7 +328,7 @@ class RedisClient():
                 self.saveConfig()
                 await asyncio.sleep(50)
             except asyncio.exceptions.CancelledError:
-                return
+                raise
             except:
                 log.error("Error occured:")
                 log.error(traceback.format_exc())
@@ -362,7 +362,7 @@ class RedisClient():
                         ##
                 await asyncio.sleep(self.read_delay)
             except asyncio.exceptions.CancelledError:
-                return
+                raise
             except aioredis.exceptions.ConnectionError:
                 self.connected = False
             except:
