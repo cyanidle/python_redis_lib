@@ -39,7 +39,9 @@ class Supervisor:
         for obj in self.obj_list:
             if hasattr(obj,"handleTerm") and callable(getattr(obj, "handleTerm")):
                 log.warn(f"Starting shutdown sequence for {obj}")
-                loop.create_task(obj.handleTerm())
+                coro = obj.handleTerm()
+                if asyncio.coroutines.iscoroutine(coro):
+                    loop.create_task(coro)
             else:
                 log.warn(f"Supervised object {obj} does not have a 'handleTerm()' method!")
         loop.create_task(self._shutdownChecker())
