@@ -24,7 +24,7 @@ class Supervisor:
     """
     def __init__(self, *args:object, ioloop: asyncio.AbstractEventLoop) -> None:
         self.ioloop = ioloop
-        self.obj_list = args
+        self.obj_list = list(args)
         for obj in self.obj_list:
             log.info(f"Adding {obj} to supervisor tracking")
         self.terminated = False
@@ -65,6 +65,12 @@ class Supervisor:
             task.cancel()
         time.sleep(5)
         self._rerunAll()
+    def registerNew(self, obj):
+        self.obj_list.append(obj)
+        log.info(f"Registered new object in supervising list '{obj}'")
+    def remove(self,obj):
+        log.info(f"Removing object '{obj}' from supervising list")
+        self.obj_list.remove(obj)
     def runAll(self):
         for obj in self.obj_list:
             try:
