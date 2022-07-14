@@ -18,7 +18,7 @@ from typing import Any, Union
 from typing import Tuple as Tuple_t
 from typing import List as List_t
 from typing import Dict as Dict_t
-from dataclasses import dataclass, field
+from dataclasses import KW_ONLY, dataclass, field
 import logging
 import logging.handlers
 log = logging.getLogger()
@@ -101,29 +101,40 @@ class RedisEntries:
         self.raw_dict = raw_dict
         self.stream_id = stream_id
         self.filter = filter
-        base_key = ""
-        try:
-            for key in self.raw_dict:
-                curr_key = key.split(":")[:-1]
-                if not base_key:
-                    base_key = curr_key
-                if base_key!=curr_key:
-                    log.warn(f"Non homogenous hash key while creating Redis Entries! ({base_key} != {curr_key})")
-                    log.warn("Only dict with entries for ONE object (same key, different fields) should be passed!")
-        except:
-            pass
+        #base_key = ""
+        # try:
+        #     for key in self.raw_dict:
+        #         curr_key = key.split(":")[:-1]
+        #         if not base_key:
+        #             base_key = curr_key
+        #         if base_key!=curr_key:
+        #             log.warn(f"Non homogenous hash key while creating Redis Entries! ({base_key} != {curr_key})")
+        #             log.warn("Only dict with entries for ONE object (same key, different fields) should be passed!")
+        # except:
+        #     pass
 
-    def hashKey(self) -> str:
+    def hashKeys(self) -> List_t[str]:
+        result = []
         for key in self.raw_dict:
-            split_key = key.split(':')
-            if len(split_key) == 1:
-                hash_suff = key
-            else:
-                hash_suff = ':'.join(split_key[:-1])
-            return f"{self.stream_id}:{hash_suff}" 
-    def items(self):
-        return self.raw_dict.items()
+            curr_key = self._hashKey(key)
+            if not curr_key in result:
+                result.append(curr_key)
+        return result
 
+    def _hashKey(self,key:str):
+        try: 
+            return self.stream_id + ':' + key[:key.rindex(':')]
+        except ValueError:
+            return self.stream_id + ':' +key
+
+    def items(self, hash_key:str = None):
+        result = {}
+        if hash_key:
+            for key,val in self.raw_dict.items():
+                if self._hashKey(key) == hash_key:
+                    result[key] = val
+            return result.items()
+        return self.raw_dict.items()
 @dataclass (slots=True)
 class BolidSettings:
     connection: ConnectionSettings = ConnectionSettings()
@@ -155,7 +166,10 @@ class NavigardServerSettings:
     connection: ConnectionSettings
     contact_id_map: Dict_t[str,str]
     commands_map: List_t[dict]
-    
+    KW_ONLY
+    command_timeout: float = 1
+    commands_prefix: str = None 
+
     def __post_init__(self):
         for command in self.commands_map:
             current = self.commands_map[command]
@@ -436,8 +450,11 @@ class Reader:
             log.error("Connection settings for Navigard Server not provided!")
             raise
         contact_id_mapping = src.get("mappings").get("contact_id")
+        command_timeout = src.get("command_timeout")
+        commands_prefix  = src.get("commands_prefix")
         commands_map = src.get("mappings").get("commands")
         connection = ConnectionSettings(host, port)
-        return NavigardServerSettings(connection, contact_id_mapping, commands_map)
+        return NavigardServerSettings(connection, contact_id_mapping, commands_map,
+                                     command_timeout=command_timeout, commands_prefix=commands_prefix)
 
     

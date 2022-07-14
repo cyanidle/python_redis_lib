@@ -25,10 +25,10 @@ class RedisClient():
         self.write_delay = settings.write_delay
         self.ioloop = ioloop
         self.commands_stream_key = settings.commands_stream
-        self.stream_key = settings.output_stream
+        self.output_stream_key = settings.output_stream
         self.connected = False
         url = f'redis://{self.host}:{self.port}'
-        log.info(f"Using url: {url}. Please call run() method!")
+        log.info(f"Using url: {url}. Please, call run() method!")
         self.redis: aioredis.Redis = aioredis.from_url(url, decode_responses=True)
         self.stream_wr_queue:asyncio.Queue[Dict_t[str,Any]] = asyncio.Queue()
         self.shutdown = False
@@ -47,7 +47,7 @@ class RedisClient():
         self._write_cb = cb
 
     def run(self):
-        log.info(f"Redis client INPUT_STREAM ({self.commands_stream_key}), OUTPUT_STREAM ({self.stream_key}) is running!")
+        log.info(f"Redis client INPUT_STREAM ({self.commands_stream_key}), OUTPUT_STREAM ({self.output_stream_key}) is running!")
         self.ioloop.create_task(self._startLocalSaves())
         self.ioloop.create_task(self._checkConnection())
         self.ioloop.create_task(self._startStreamWriting())
@@ -61,7 +61,7 @@ class RedisClient():
 
         Uses cache to filter unchanged entries. Hash key is <output_stream>:<domain> key : val.
         """
-        self.stream_wr_queue.put_nowait(RedisEntries(info,self.stream_key))
+        self.stream_wr_queue.put_nowait(RedisEntries(info,self.output_stream_key))
 
     async def writeUnfiltered(self, info: Dict_t[str,Any]):
         """
@@ -70,16 +70,16 @@ class RedisClient():
         
         Does not use filtering
         """
-        self.stream_wr_queue.put_nowait(RedisEntries(info,self.stream_key, filter = False))
+        self.stream_wr_queue.put_nowait(RedisEntries(info,self.output_stream_key, filter = False))
 
     async def _startTrimming(self):
         while True:
             try:
                 await asyncio.sleep(5)
                 if self.connected:
-                    info_pub = await self.redis.xinfo_stream(self.stream_key)
+                    info_pub = await self.redis.xinfo_stream(self.output_stream_key)
                     if info_pub["length"] > self.max_pub_length:
-                        await self.redis.xtrim(self.stream_key, self.max_pub_length)
+                        await self.redis.xtrim(self.output_stream_key, self.max_pub_length)
                     info_sub = await self.redis.xinfo_stream(self.commands_stream_key)
                     if info_sub["length"] > self.max_sub_length:
                         await self.redis.xtrim(self.commands_stream_key, self.max_sub_length)
@@ -149,19 +149,20 @@ class RedisClient():
             cache = {}
             while not entries_q.empty():
                 entries:RedisEntries = entries_q.get_nowait()
-                curr_hash_key = entries.hashKey()
-                if hash_key != curr_hash_key:
-                    hash_key = curr_hash_key
-                    cache = await self.redis.hgetall(hash_key)
-                for key, val in entries.items():
-                    split_key = key.split(":")
-                    field = split_key[-1]
-                    current = cache.get(field)
-                    if not current is None and current == str(val) and entries.filter:
-                        continue
-                    await self.redis.hset(hash_key, field, val)
-                    cache[field] = val
-                    result[key] = val
+                curr_hash_keys = entries.hashKeys()
+                for curr_hash_key in curr_hash_keys:
+                    if hash_key != curr_hash_key:
+                        hash_key = curr_hash_key
+                        cache = await self.redis.hgetall(hash_key)
+                    for key, val in entries.items(curr_hash_key):
+                        split_key = key.split(":")
+                        field = split_key[-1]
+                        current = cache.get(field)
+                        if not current is None and current == str(val) and entries.filter:
+                            continue
+                        await self.redis.hset(hash_key, field, val)
+                        cache[field] = val
+                        result[key] = val
             return result
         except:
             log.error("An Error occured while processing write request:")
@@ -180,16 +181,16 @@ class RedisClient():
 
 
     async def fastStreamWrite(self, entries_list:List[dict]):
-        if not self.stream_key:
+        if not self.output_stream_key:
             log.warn("Fast write called without output stream configured!")
             return
         try:
             if self.connected:
                 to_write = await self.processRedisWrList(entries_list)
                 if to_write:
-                    log.info(f'Force writing to stream {self.stream_key}:')
+                    log.info(f'Force writing to stream {self.output_stream_key}:')
                     log.info(to_write)
-                    new_entry_id = await self.redis.xadd(self.stream_key, to_write)
+                    new_entry_id = await self.redis.xadd(self.output_stream_key, to_write)
                     self.need_cache_update = True
                     log.info(f'Station stream entry added: {new_entry_id}')
                 await asyncio.sleep(self.write_delay)
@@ -290,18 +291,18 @@ class RedisClient():
         
         The hash-key for (device:field) is (output stream key):(device)
         """
-        if not self.stream_key:
+        if not self.output_stream_key:
             return
         while True:
             try:
                 if self.connected and not self.stream_wr_queue.empty():
                     to_write = await self.processRedisWrQueue(self.stream_wr_queue)
                     if to_write:
-                        log.info('Writing to stream:')
+                        log.info(f'Writing to stream {self.output_stream_key}:')
                         log.info(to_write)
-                        new_entry_id = await self.redis.xadd(self.stream_key, to_write)
+                        new_entry_id = await self.redis.xadd(self.output_stream_key, to_write)
                         self.need_cache_update = True
-                        log.info(f'Station stream entry added: {new_entry_id}')
+                        log.info(f'{self.output_stream_key} stream entry added: {new_entry_id}')
                     await asyncio.sleep(self.write_delay)
                 else:
                     await asyncio.sleep(self.write_delay)
