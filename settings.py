@@ -279,7 +279,7 @@ class Reader:
         self.config_file = file
         self.read(force=True)
 
-    def configPath(self, file: str = ""):
+    def configPath(self, file: str = None):
         if not file:
             file = self.config_file
         return f"{self.config_directory}/{file}"
@@ -299,7 +299,7 @@ class Reader:
         if path.exists(self.configPath(file)):
             self.config_file = file
         else:
-            Reader.log.warn("File passed is nonexistent")
+            log.warn("File passed is nonexistent")
         try:
             self.read(force=True)
         except:
@@ -308,8 +308,10 @@ class Reader:
 
     def read(self, force: bool):
         if force or not self.config_dict:
-            self.config_dict = self._read()
-
+            try:
+                self.config_dict = self._read()
+            except:
+                log.warn(f"{self.configPath()} not found!")
     def _read(self, file:str = None):
         with open(self.configPath(file),"r") as f:
                 return toml.load(f)
