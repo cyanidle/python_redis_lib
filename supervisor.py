@@ -29,8 +29,9 @@ class Supervisor:
             log.info(f"Adding {obj} to supervisor tracking")
         self.terminated = False
         ioloop.set_exception_handler(self.errorHook)
-        ioloop.add_signal_handler(signal.SIGTERM, self.handleTerm)
-        ioloop.add_signal_handler(signal.SIGINT, self.handleTerm)
+        if not sys.platform.startswith('win'):
+            ioloop.add_signal_handler(signal.SIGTERM, self.handleTerm)
+            ioloop.add_signal_handler(signal.SIGINT, self.handleTerm)
     def handleTerm(self):
         self.terminated = True
         for task in asyncio.all_tasks():

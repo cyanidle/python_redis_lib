@@ -1,20 +1,11 @@
 # -*- coding: utf-8 -*-
 import traceback
 import toml
-from pymodbus.client.asynchronous.async_io import AsyncioModbusSerialClient as ModbusClientSerial
-from pymodbus.client.asynchronous.async_io import AsyncioModbusUdpClient as ModbusClientUDP
-from pymodbus.client.asynchronous.async_io import AsyncioModbusTcpClient as ModbusClientTCP
-from pymodbus.framer.rtu_framer import ModbusRtuFramer as RtuFramer
-from pymodbus.framer.socket_framer import ModbusSocketFramer as SocketFramer
-from pymodbus.client.asynchronous import schedulers
-import calendar as cldr
 import datetime as dt
-import base64
-from math import sin
-from aioping import ping
+from abc import ABC, abstractmethod, abstractstaticmethod
 import asyncio
-from os import path, stat
-from typing import Any, Union
+from os import path
+from typing import Any, Type, Union
 from typing import Tuple as Tuple_t
 from typing import List as List_t
 from typing import Dict as Dict_t
@@ -23,75 +14,15 @@ import logging
 import logging.handlers
 log = logging.getLogger()
 
+class SettingsStructTemplate(ABC):
+    @abstractstaticmethod
+    def parse(*args, **kwargs):
+        raise NotImplementedError
+
 @dataclass (slots=True)
 class ConnectionSettings:
     host: str = "0.0.0.0"
     port: int = 502
-
-@dataclass (slots=True)
-class ModbusDevice:
-    parent: object = None
-    parent_name: str = ""
-    hash_name: str = ""
-    slave_id: int = 0
-    name: str = ""
-    stop_commands: dict = field(default_factory=lambda:dict())
-
-    holding_ranges: List_t[Tuple_t[int,int]] = field(default_factory = lambda: list())
-    input_ranges: List_t[Tuple_t[int,int]] = field(default_factory = lambda: list())
-
-    holding_registers: Dict_t[str,int] = field(default_factory = lambda: dict())
-    reversed_holding: Dict_t[int,str] = field(init=False)
-
-    input_registers: Dict_t[str,int]  = field(default_factory = lambda: dict())
-    reversed_input: Dict_t[int,str] = field(init=False)
-
-    write_registers: Dict_t[str,int] = field(default_factory = lambda: dict())
-    reversed_write:Dict_t[int,str] = field(init=False)
-
-    hold_polling_waittime: float = 3
-    input_polling_waittime: float = 1
-    write_delay: float = 0.5
-    write_queue: asyncio.Queue = field(init=False)
-
-    def initReversedDicts(self):
-        def flipDict(source:dict)->dict:
-            result = dict()
-            for key, val in source.items():
-                result[val] = key
-            return result
-        self.reversed_holding = flipDict(self.holding_registers)
-        self.reversed_input = flipDict(self.input_registers)
-        self.reversed_write = flipDict(self.write_registers)
-
-    async def _processHolding(self, registers: list, start_index: int) -> dict:
-        if not registers or registers is None:
-            return dict()
-        result = dict()
-        for num, register in enumerate(registers):
-            full_index = num + start_index
-            key = self.reversed_holding.get(full_index)
-            if key and key is not None:
-                result[f"{self.parent.settings.name}:{self.name}:{key}"] = register
-        return result
-
-    async def _processInput(self, registers, start_index: int) -> dict:
-        if not registers or registers is None:
-            return dict()
-        result = dict()
-        for num, register in enumerate(registers):
-            full_index = num + start_index
-            key = self.reversed_input[full_index]
-            result[f"{self.parent.settings.name}:{self.name}:{key}"] = register
-        return result
-
-    async def _processWriteData(self, data:dict) -> Union[tuple,None]:
-        for key, val in data.items():
-            return (self.write_registers[key], int(val))
-    
-    @property
-    def full_name(self):
-        return f"{self.parent_name}:{self.name}"
 
 class RedisEntries:
     def __init__(self, raw_dict:Dict_t[str,Union[str,int]], stream_id : str, *, filter = True) -> None:
@@ -135,19 +66,7 @@ class RedisEntries:
                     result[key] = val
             return result.items()
         return self.raw_dict.items()
-@dataclass (slots=True)
-class BolidSettings:
-    connection: ConnectionSettings = ConnectionSettings()
-    client_type: str = "udp"
-    framer_type: str = "rtu"
-    framer_factory: Union[RtuFramer,SocketFramer] = RtuFramer
-    client_factory: Union[ModbusClientTCP, ModbusClientUDP] = ModbusClientUDP
-    devices: List_t[ModbusDevice] = field(default_factory = lambda: list())
-    name: str = ""
-    reconnect_timeout: int = 5
-    query_handle_delay: float = 0.02
-    query_timeout: float = 0.5
-    max_queries:int = 50
+
     
 @dataclass (slots=True)
 class RedisSettings:
@@ -263,17 +182,7 @@ class FountainSettings:
     op_modes: Dict_t[str,OperationMode] = field(init=False)
     redis: RedisSettings = field(init=False)
 
-@dataclass (slots=True)
-class ManagerSettings:
-    ping_delay: float = 1
-    queue_flush_check_delay: float = 2
-    max_queue: int = 5000
-
 class Reader:
-
-    framer_factory_dict = {"rtu" : RtuFramer, "socket": SocketFramer}
-    client_factory_dict = {"udp": ModbusClientUDP, "tcp": ModbusClientTCP, "serial": ModbusClientSerial}
-
     def __init__(self, *, dir = "conf", file = "config.toml") -> None:
         self.config_directory = dir
         self.config_file = file
@@ -316,70 +225,6 @@ class Reader:
         with open(self.configPath(file),"r") as f:
                 return toml.load(f)
 
-    def parseModbusDevices(self, devs: List_t[dict], *,  parent_settings: BolidSettings, registers_file = "config.toml") -> List_t[ModbusDevice]:
-        def parseRegisters(device:ModbusDevice, ranges: List_t[dict], registers_file = "config.toml") -> None:
-            if ranges:
-                for reg_ranges in ranges:
-                    if reg_ranges["type"] == "holding":
-                        device.holding_ranges.append((reg_ranges["reg_index"], reg_ranges["reg_count"]))
-                    elif reg_ranges["type"] == "input":
-                        device.input_ranges.append((reg_ranges["reg_index"], reg_ranges["reg_count"]))
-                    else:
-                        raise RuntimeError(f"Incorrect type passed in settings {reg_ranges['type']}")
-            ########
-            registers_dict = self._read(registers_file)
-            holdings_dict = registers_dict.get("registers").get(parent_settings.name).get(device.name, {}).get("holding", {})
-            inputs_dict = registers_dict.get("registers").get(parent_settings.name).get(device.name, {}).get("input", {})
-            write_dict = registers_dict.get("registers").get(parent_settings.name).get(device.name, {}).get("write", {})
-            def fillDict(dict_to_fill:dict, source:dict):
-                for key in source:
-                    dict_to_fill[key] = source[key]["index"]
-            fillDict(device.holding_registers,holdings_dict)
-            fillDict(device.input_registers,inputs_dict)
-            fillDict(device.write_registers,write_dict) 
-            device.initReversedDicts()
-        ###############################################
-        result = list()
-        for name, mod_dict in devs.items():
-            current = ModbusDevice()
-            current.name = name
-            current.slave_id = mod_dict.get("slave_id", current.slave_id)
-            current.hold_polling_waittime = mod_dict.get("holding_poll_time", current.hold_polling_waittime)
-            current.input_polling_waittime = mod_dict.get("input_poll_time", current.input_polling_waittime)
-            current.write_delay = mod_dict.get("write_delay", current.write_delay)
-            current.stop_commands = mod_dict.get("stop_commands", current.stop_commands)
-            current.parent_name = parent_settings.name
-            current.write_queue = asyncio.Queue(parent_settings.max_queries)
-            parseRegisters(current, mod_dict.get("register_ranges"),registers_file)
-            result.append(current)
-        return result
-    
-    def parseBolids(self, **kwargs) -> List_t[BolidSettings]:
-        result = list()
-        for bol_name in self.config_dict["bolid"]:
-            current_bol_dict = self.config_dict["bolid"][bol_name]
-            current = BolidSettings()
-            current.name = bol_name
-            current.query_handle_delay = current_bol_dict.get("query_handle_delay", current.query_handle_delay)
-            current.query_timeout = current_bol_dict.get("query_timeout", current.query_timeout)
-            current.max_queries = current_bol_dict.get("max_queries", current.max_queries)
-            current.connection.port = current_bol_dict.get("port", current.connection.port)
-            current.connection.host = current_bol_dict.get("host", current.connection.host)
-            current.client_type = current_bol_dict.get("connection_type", current.client_type)
-            current.framer_type = current_bol_dict.get("protocol", current.framer_type)
-            current.framer_factory = Reader.framer_factory_dict.get(current.framer_type)
-            current.client_factory = Reader.client_factory_dict.get(current.client_type)
-            current.devices = self.parseModbusDevices(current_bol_dict.get("devices",{}), parent_settings=current, registers_file=kwargs.get("registers_file"))
-            result.append(current)
-        return result
-
-    def parseManagerSettings(self) -> ManagerSettings:
-        result = ManagerSettings()
-        manager_dict = self.config_dict.get("manager").get("settings")
-        result.queue_flush_check_delay = manager_dict.get("queue_flush_check_delay", result.queue_flush_check_delay)
-        result.ping_delay = manager_dict.get("ping_delay", result.ping_delay)
-        return result
-
     def parseRedisSettings(self, *, top_dict:dict = None) -> RedisSettings:
         result = RedisSettings()
         if top_dict:
@@ -396,6 +241,9 @@ class Reader:
         result.max_pub_length = int(redis_dict.get("max_publish_length",result.max_pub_length))
         result.max_sub_length = int(redis_dict.get("max_commands_length",result.max_sub_length))
         return result
+
+    def parse(self, struct: Type, *args, **kwargs):
+        return struct.parse(*args, **kwargs, reader = self)
 
     def parseControlSet(self, src: Dict_t[str,str]) -> ModbusControlSet:
         return ModbusControlSet(
