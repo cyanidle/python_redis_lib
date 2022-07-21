@@ -68,22 +68,6 @@ class RedisSettings:
     max_pub_length: int = 50000
     max_sub_length: int = 50000 
 
-
-@dataclass (slots=True)
-class NavigardServerSettings:
-    connection: ConnectionSettings
-    contact_id_map: Dict_t[str,str]
-    commands_map: List_t[dict]
-    KW_ONLY
-    command_timeout: float = 1
-    commands_prefix: str = None 
-
-    def __post_init__(self):
-        for command in self.commands_map:
-            current = self.commands_map[command]
-            if type(current) != list:
-                self.commands_map[command] = [current]
-
 class Reader:
     def __init__(self, *, dir = "conf", file = "config.toml") -> None:
         self.config_directory = dir
@@ -122,7 +106,7 @@ class Reader:
             try:
                 self.config_dict = self._read()
             except:
-                log.warn(f"{self.configPath()} not found!")
+                log.warn(f"Error reading {self.configPath()}!")
     def _read(self, file:str = None):
         with open(self.configPath(file),"r") as f:
                 return toml.load(f)
@@ -147,21 +131,5 @@ class Reader:
     def parse(self, struct: Type, *args, **kwargs):
         return struct.parse(*args, **kwargs, reader = self)
 
-    def parseNavigardServer(self, src: Dict_t[str, Any] = None) -> NavigardServerSettings:
-        if src is None:
-            src = self.config_dict.get("navigard_server")
-        try:
-            host = src.get("connection").get("host")
-            port = src.get("connection").get("port")
-        except:
-            log.error("Connection settings for Navigard Server not provided!")
-            raise
-        contact_id_mapping = src.get("mappings").get("contact_id")
-        command_timeout = src.get("command_timeout")
-        commands_prefix  = src.get("commands_prefix")
-        commands_map = src.get("mappings").get("commands")
-        connection = ConnectionSettings(host, port)
-        return NavigardServerSettings(connection, contact_id_mapping, commands_map,
-                                     command_timeout=command_timeout, commands_prefix=commands_prefix)
 
     
