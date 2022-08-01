@@ -10,7 +10,7 @@ import functools
 from typing import Dict as Dict_t, List, Union
 from typing import Any
 from python_redis_lib.settings import RedisSettings, RedisEntries
-log = logging.getLogger()
+log = logging.getLogger("python_redis_lib.redis")
 
 BLOCK_DELAY = 0
 LOCALSTORAGE_NAME = "localstorage.ini"
@@ -18,7 +18,7 @@ ENABLE_LOCALSTORAGE = False
 
 def redis_oneshot(func):
     @functools.wraps(func)
-    async def wrapper(*args, **kwargs):
+    async def oneshot_wrapper(*args, **kwargs):
         try:
             self = args[0]
             if self.connected:
@@ -37,7 +37,7 @@ def redis_oneshot(func):
             log.error("Error occured:")
             log.error(traceback.format_exc())
             raise
-    return wrapper
+    return oneshot_wrapper
 
 class RedisClient():
     def __init__(self, settings: RedisSettings, *, ioloop:asyncio.AbstractEventLoop, write_cb = None):
@@ -222,7 +222,7 @@ class RedisClient():
             return
 
     @redis_oneshot
-    async def _saveSetCache(self, set_key:str, *info:list):
+    async def addToSet(self, set_key:str, *info:list):
         if self.connected and info:
             await self.redis.sadd(set_key, *info)
         else:
@@ -230,7 +230,7 @@ class RedisClient():
             return
 
     @redis_oneshot
-    async def _getSetCache(self, set_key:str)->Union[list,None]:
+    async def getSetCache(self, set_key:str)->Union[list,None]:
         if self.connected:
             return await self.redis.smembers(set_key)
         else:
@@ -238,7 +238,7 @@ class RedisClient():
             return None
 
     @redis_oneshot
-    async def _saveHashCache(self, hash_key,info:dict):
+    async def addToHash(self, hash_key,info:dict):
         if self.connected and info:
             await self.redis.hmset(hash_key, info)
         else:
@@ -246,7 +246,7 @@ class RedisClient():
             return
 
     @redis_oneshot
-    async def _getHashCache(self, hash_key:str) -> dict:
+    async def getHashCache(self, hash_key:str) -> dict:
         if self.connected:
             raw_dict = await self.redis.hgetall(hash_key)
             return raw_dict
@@ -259,7 +259,15 @@ class RedisClient():
         if self.connected:
             await self.redis.delete(key)
         else:
-            log.warn("Cache get called while not connected!")
+            log.warn("DEL called while not connected!")
+            return
+
+    @redis_oneshot
+    async def deleteSetMembers(self, set:str, *values):
+        if self.connected:
+            await self.redis.srem(set, *values)
+        else:
+            log.warn("SREM called while not connected!")
             return
 
     async def _startStreamWriting(self):

@@ -6,7 +6,7 @@ import signal
 import sys
 import time
 import traceback
-log = logging.getLogger()
+log = logging.getLogger("python_redis_lib.supervisor")
 
 class Supervisor:
     """
