@@ -6,6 +6,7 @@ import aioredis
 import logging
 import logging.handlers
 import traceback
+import functools
 from typing import Dict as Dict_t, List, Union
 from typing import Any
 from python_redis_lib.settings import RedisSettings, RedisEntries
@@ -14,6 +15,29 @@ log = logging.getLogger()
 BLOCK_DELAY = 0
 LOCALSTORAGE_NAME = "localstorage.ini"
 ENABLE_LOCALSTORAGE = False
+
+def redis_oneshot(func):
+    @functools.wraps(func)
+    async def wrapper(*args, **kwargs):
+        try:
+            self = args[0]
+            if self.connected:
+                return await func(*args, **kwargs)
+            else:
+                log.error(f"Attempt to call Oneshot function, while redis not connected!")
+                log.error(f"Call Stack:\n{traceback.format_stack()}") 
+        except KeyboardInterrupt:
+            log.info('Ctrl-C process shutdown requested. Closing...')
+            await self.shutdownHook()
+        except aioredis.exceptions.ConnectionError:
+            self.connected = False
+        except asyncio.exceptions.CancelledError:
+            raise
+        except:
+            log.error("Error occured:")
+            log.error(traceback.format_exc())
+            raise
+    return wrapper
 
 class RedisClient():
     def __init__(self, settings: RedisSettings, *, ioloop:asyncio.AbstractEventLoop, write_cb = None):
@@ -179,111 +203,64 @@ class RedisClient():
         return result
 
 
-
+    @redis_oneshot
     async def fastStreamWrite(self, entries_list:List[dict]):
         if not self.output_stream_key:
             log.warn("Fast write called without output stream configured!")
             return
-        try:
-            if self.connected:
-                to_write = await self.processRedisWrList(entries_list)
-                if to_write:
-                    log.info(f'Force writing to stream {self.output_stream_key}:')
-                    log.info(to_write)
-                    new_entry_id = await self.redis.xadd(self.output_stream_key, to_write)
-                    self.need_cache_update = True
-                    log.info(f'Station stream entry added: {new_entry_id}')
-                await asyncio.sleep(self.write_delay)
-            else:
-                log.warn("Fast stream write called while not connected!")
-                return
-        except KeyboardInterrupt:
-            log.info('Ctrl-C process shutdown requested. Closing...')
-            await self.shutdownHook()
-        except aioredis.exceptions.ConnectionError:
-            self.connected = False
-        except asyncio.exceptions.CancelledError:
-            raise
-        except:
-            log.error("Error occured:")
-            log.error(traceback.format_exc())
-            raise
+        if self.connected:
+            to_write = await self.processRedisWrList(entries_list)
+            if to_write:
+                log.info(f'Force writing to stream {self.output_stream_key}:')
+                log.info(to_write)
+                new_entry_id = await self.redis.xadd(self.output_stream_key, to_write)
+                self.need_cache_update = True
+                log.info(f'Station stream entry added: {new_entry_id}')
+            await asyncio.sleep(self.write_delay)
+        else:
+            log.warn("Fast stream write called while not connected!")
+            return
 
+    @redis_oneshot
     async def _saveSetCache(self, set_key:str, *info:list):
-        try:
-            if self.connected and info:
-                await self.redis.sadd(set_key, *info)
-            else:
-                log.warn("Cache Set Append called while not connected!")
-                return
-        except KeyboardInterrupt:
-            log.info('Ctrl-C process shutdown requested. Closing...')
-            await self.shutdownHook()
-        except aioredis.exceptions.ConnectionError:
-            self.connected = False
-        except asyncio.exceptions.CancelledError:
-            raise
-        except:
-            log.error("Error occured:")
-            log.error(traceback.format_exc())
-            raise
+        if self.connected and info:
+            await self.redis.sadd(set_key, *info)
+        else:
+            log.warn("Cache Set Append called while not connected!")
+            return
+
+    @redis_oneshot
     async def _getSetCache(self, set_key:str)->Union[list,None]:
-        try:
-            if self.connected:
-                return await self.redis.smembers(set_key)
-            else:
-                log.warn("Cache Set Append called while not connected!")
-                return None
-        except KeyboardInterrupt:
-            log.info('Ctrl-C process shutdown requested. Closing...')
-            await self.shutdownHook()
-        except aioredis.exceptions.ConnectionError:
-            self.connected = False
-        except asyncio.exceptions.CancelledError:
-            raise
-        except:
-            log.error("Error occured:")
-            log.error(traceback.format_exc())
-            raise
+        if self.connected:
+            return await self.redis.smembers(set_key)
+        else:
+            log.warn("Cache Set Append called while not connected!")
+            return None
 
+    @redis_oneshot
     async def _saveHashCache(self, hash_key,info:dict):
-        try:
-            if self.connected and info:
-                await self.redis.hmset(hash_key, info)
-            else:
-                log.warn("Cache save called while not connected!")
-                return
-        except KeyboardInterrupt:
-            log.info('Ctrl-C process shutdown requested. Closing...')
-            await self.shutdownHook()
-        except aioredis.exceptions.ConnectionError:
-            self.connected = False
-        except asyncio.exceptions.CancelledError:
-            raise
-        except:
-            log.error("Error occured:")
-            log.error(traceback.format_exc())
-            raise
+        if self.connected and info:
+            await self.redis.hmset(hash_key, info)
+        else:
+            log.warn("Cache save called while not connected!")
+            return
 
+    @redis_oneshot
     async def _getHashCache(self, hash_key:str) -> dict:
-        try:
-            if self.connected:
-                raw_dict = await self.redis.hgetall(hash_key)
-                return raw_dict
-            else:
-                log.warn("Cache get called while not connected!")
-                return
-        except KeyboardInterrupt:
-            log.info('Ctrl-C process shutdown requested. Closing...')
-            await self.shutdownHook()
-        except aioredis.exceptions.ConnectionError:
-            self.connected = False
-        except asyncio.exceptions.CancelledError:
-            raise
-        except:
-            log.error("Error occured:")
-            log.error(traceback.format_exc())
-            raise
+        if self.connected:
+            raw_dict = await self.redis.hgetall(hash_key)
+            return raw_dict
+        else:
+            log.warn("Cache get called while not connected!")
+            return
+
+    @redis_oneshot
+    async def deleteKey(self, key:str):
+        if self.connected:
+            await self.redis.delete(key)
+        else:
+            log.warn("Cache get called while not connected!")
+            return
 
     async def _startStreamWriting(self):
         """
