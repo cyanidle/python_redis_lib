@@ -85,7 +85,7 @@ class RedisClient():
 
         Uses cache to filter unchanged entries. Hash key is <output_stream>:<domain> key : val.
         """
-        self.stream_wr_queue.put_nowait(RedisEntries(info,self.output_stream_key))
+        await self.stream_wr_queue.put(RedisEntries(info,self.output_stream_key))
 
     async def writeUnfiltered(self, info: Dict_t[str,Any]):
         """
@@ -94,7 +94,7 @@ class RedisClient():
         
         Does not use filtering
         """
-        self.stream_wr_queue.put_nowait(RedisEntries(info,self.output_stream_key, filter = False))
+        await self.stream_wr_queue.put(RedisEntries(info,self.output_stream_key, filter = False))
 
     async def _startTrimming(self):
         while True:
