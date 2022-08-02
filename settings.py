@@ -129,7 +129,15 @@ class Reader:
         return result
 
     def parse(self, struct: Type, *args, **kwargs):
-        return struct.parse(*args, **kwargs, reader = self)
+        """
+        Used to call on struct class, which contains parse() method.
+
+        Passes itself as a 'reader' argument
+        """
+        if not hasattr(struct, "parse") or not callable(struct.parse):
+            log.error(f"Passed class does not contain parse() method!")
+        else:
+            return struct.parse(*args, **kwargs, reader = self)
 
 
     
