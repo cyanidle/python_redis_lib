@@ -224,7 +224,7 @@ class RedisClient():
 
     @redis_oneshot
     async def saveKeyVal(self, key:str, info:str):
-        if self.connected and info:
+        if self.connected and not info is None:
             await self.redis.set(key, info)
         else:
             log.warn("Cache Set Append called while not connected!")
