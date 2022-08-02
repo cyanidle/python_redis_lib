@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+from asyncio import coroutines
 import configparser
 from dataclasses import dataclass, field
 import asyncio
@@ -338,7 +339,9 @@ class RedisClient():
                             if current_id > last_id:
                                 last_id = current_id
                             try:
-                                await self._write_cb(entry)
+                                coro = self._write_cb(entry)
+                                if coroutines.iscoroutine(coro):
+                                    await coro 
                             except TypeError:
                                 log.error(f"Callback function is not an asyncio coroutine!")
                         ##

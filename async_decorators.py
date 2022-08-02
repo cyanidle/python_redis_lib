@@ -10,19 +10,19 @@ class ContinueLoop(Exception):
 class ReturnFromLoop(Exception):
     pass
 class LoopSleep(Exception):
-    def __init__(self, *args: object) -> None:
-        self.seconds = args[0]
+    def __init__(self, seconds:float, *args: object) -> None:
+        self.seconds = seconds
         super().__init__(*args)
 
-def async_oneshot_factory(*, logger:logging.Logger, on_shutdown:function = None):
-    async def shutdownHook():
-        if on_shutdown is None:
-            pass
-        else:
-            coro = on_shutdown
-            if coroutines.iscoroutine(coro):
-                await coro
-    def async_oneshot(func):
+def async_oneshot(* , logger:logging.Logger, on_shutdown = None):
+    def _async_oneshot(func):
+        async def shutdownHook():
+            if on_shutdown is None:
+                pass
+            else:
+                coro = on_shutdown
+                if coroutines.iscoroutine(coro):
+                    await coro
         @functools.wraps(func)
         async def oneshot_wrapper(*args, **kwargs):
             try:
@@ -37,17 +37,17 @@ def async_oneshot_factory(*, logger:logging.Logger, on_shutdown:function = None)
                 logger.error(traceback.format_exc())
                 raise
         return oneshot_wrapper
-    return async_oneshot
+    return _async_oneshot
 
-def async_repeating_task_factory(logger:logging.Logger, delay, on_shutdown:function = None):
-    async def shutdownHook():
-        if on_shutdown is None:
-            pass
-        else:
-            coro = on_shutdown
-            if coroutines.iscoroutine(coro):
-                await coro
-    def async_repeating_task(func):
+def async_repeating_task(*, delay:float, on_shutdown = None, logger = logging.getLogger()):
+    def _async_repeating_task(func):
+        async def shutdownHook():
+            if on_shutdown is None:
+                pass
+            else:
+                coro = on_shutdown
+                if coroutines.iscoroutine(coro):
+                    await coro
         @functools.wraps(func)
         async def oneshot_wrapper(*args, **kwargs):
             try:
@@ -74,4 +74,4 @@ def async_repeating_task_factory(logger:logging.Logger, delay, on_shutdown:funct
                 logger.error(traceback.format_exc())
                 raise
         return oneshot_wrapper
-    return async_repeating_task
+    return _async_repeating_task
