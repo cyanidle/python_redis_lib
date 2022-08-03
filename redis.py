@@ -224,8 +224,12 @@ class RedisClient():
             return
 
     @redis_oneshot
-    async def saveKeyVal(self, key:str, info:str):
+    async def saveKeyVal(self, key:str, info:str, *, filtered:bool = False):
         if self.connected and not info is None:
+            if filtered:
+                current = await self.redis.get(key)
+                if str(current) == str(info):
+                    return    
             await self.redis.set(key, info)
         else:
             log.warn("SET called while not connected!")
