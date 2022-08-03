@@ -220,6 +220,7 @@ class RedisClient():
             await asyncio.sleep(self.write_delay)
         else:
             log.warn("Fast stream write called while not connected!")
+            await asyncio.sleep(0.05)
             return
 
     @redis_oneshot
@@ -227,15 +228,17 @@ class RedisClient():
         if self.connected and not info is None:
             await self.redis.set(key, info)
         else:
-            log.warn("Cache Set Append called while not connected!")
+            log.warn("SET called while not connected!")
+            await asyncio.sleep(0.05)
             return
 
     @redis_oneshot
     async def addToSet(self, set_key:str, *info:list):
-        if self.connected and info:
+        if self.connected and not info is None:
             await self.redis.sadd(set_key, *info)
         else:
-            log.warn("Cache Set Append called while not connected!")
+            log.warn("SADD Append called while not connected!")
+            await asyncio.sleep(0.05)
             return
 
     @redis_oneshot
@@ -243,15 +246,17 @@ class RedisClient():
         if self.connected:
             return await self.redis.smembers(set_key)
         else:
-            log.warn("Cache Set Append called while not connected!")
+            log.warn("SMEMBERS called while not connected!")
+            await asyncio.sleep(0.05)
             return None
 
     @redis_oneshot
     async def addToHash(self, hash_key,info:dict):
-        if self.connected and info:
+        if self.connected and not info is None:
             await self.redis.hmset(hash_key, info)
         else:
-            log.warn("Cache save called while not connected!")
+            log.warn("HMSET called while not connected!")
+            await asyncio.sleep(0.05)
             return
 
     @redis_oneshot
@@ -260,7 +265,8 @@ class RedisClient():
             raw_dict = await self.redis.hgetall(hash_key)
             return raw_dict
         else:
-            log.warn("Cache get called while not connected!")
+            log.warn("HGETALL called while not connected!")
+            await asyncio.sleep(0.05)
             return
 
     @redis_oneshot
@@ -269,14 +275,16 @@ class RedisClient():
             await self.redis.delete(key)
         else:
             log.warn("DEL called while not connected!")
+            await asyncio.sleep(0.05)
             return
 
     @redis_oneshot
     async def deleteSetMembers(self, set:str, *values):
-        if self.connected:
+        if self.connected and not values is None:
             await self.redis.srem(set, *values)
         else:
             log.warn("SREM called while not connected!")
+            await asyncio.sleep(0.05)
             return
 
     async def _startStreamWriting(self):
