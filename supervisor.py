@@ -6,8 +6,8 @@ import signal
 import sys
 import time
 import traceback
-log_lib = logging.getLogger("python_redis_lib")
-log = logging.getLogger("python_redis_lib.supervisor")
+
+log = logging.getLogger(__name__)
 
 class Supervisor:
     """
@@ -23,7 +23,13 @@ class Supervisor:
 
     Needs used 'asyncio.EventLoop' object passed as 'ioloop' argument
     """
+    _was_init = False
     def __init__(self, *args:object, ioloop: asyncio.AbstractEventLoop) -> None:
+        log = logging.getLogger(__name__)
+        if self._was_init:
+            log.warn("Only one supervisor should be created!")
+            return
+        self._was_init = True
         self.ioloop = ioloop
         self.obj_list = list(args)
         for obj in self.obj_list:

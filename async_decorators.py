@@ -5,6 +5,8 @@ import logging
 import traceback
 import asyncio
 
+log = logging.getLogger(__name__)
+
 class ContinueLoop(Exception):
     """(async_repeating_task) Raise to restart task soon"""
     def __init__(self, *args: object) -> None:
@@ -25,7 +27,7 @@ class LoopSleep(Exception):
         super().__init__(*args)
 
 def async_oneshot(func = None, **kwargs):
-    logger:logging.Logger = kwargs.get("logger") or logging.getLogger() 
+    logger:logging.Logger = kwargs.get("logger") or log
     on_shutdown = kwargs.get("on_shutdown")
     def _async_oneshot(func):
         async def shutdownHook():
@@ -53,7 +55,7 @@ def async_oneshot(func = None, **kwargs):
         return _async_oneshot
     return _async_oneshot(func)
 
-def async_repeating_task(*, delay:float, on_shutdown = None, logger = logging.getLogger()):
+def async_repeating_task(*, delay:float, on_shutdown = None, logger = log):
     def _async_repeating_task(func):
         async def shutdownHook():
             if on_shutdown is None:

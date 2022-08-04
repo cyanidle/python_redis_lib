@@ -12,7 +12,8 @@ from typing import Dict as Dict_t
 from dataclasses import KW_ONLY, dataclass, field
 import logging
 import logging.handlers
-log = logging.getLogger("python_redis_lib.settings")
+
+log = logging.getLogger(__name__)
 
 class SettingsStructTemplate(ABC):
     @abstractstaticmethod

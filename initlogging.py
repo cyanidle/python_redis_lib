@@ -2,44 +2,44 @@
 import logging
 import logging.handlers
 import os.path
+from typing import List
 from python_redis_lib.settings import LoggingSettings
 
-def initLogging(caller_file:str, module_name:str, *,  settings: LoggingSettings = LoggingSettings()) -> logging.Logger:
+log_root = logging.getLogger()
+log = logging.getLogger(__name__)
+
+def initLogging(caller_file:str, *,  settings: LoggingSettings = LoggingSettings()) -> logging.Logger:
     """
     Should be called with '__file__' as the first argument and 'module name' as in logging config as second!
     """
-    log_root = logging.getLogger()
-    log = logging.getLogger(module_name)
+    handlers:List[logging.Handler] = []
+    format_str = '%(levelname)-8s %(module)-12s %(lineno)-6s %(message)s   <-- %(funcName)s()'
     if settings.add_timestamp:
-        format = logging.Formatter('%(asctime)-15s %(levelname)-8s %(module)-15s:%(lineno)-8s %(message)s')
-    else:
-        format = logging.Formatter('%(levelname)-8s %(module)-15s:%(lineno)-8s %(message)s')
+        format_str = '%(asctime)-15s ' + format_str
+    format = logging.Formatter(format_str)
     if settings.logfilename:
         logfilename = os.path.join(os.path.dirname(os.path.realpath(caller_file)), *(settings.logfilename.split("/")))
         file_handler = logging.handlers.RotatingFileHandler(
             logfilename, maxBytes = 524288000, backupCount = 2)
-        file_handler.setLevel(logging.INFO)
         file_handler.setFormatter(format)
-        log_root.addHandler(file_handler)
+        handlers.append(file_handler)
     if settings.enable_console:
         console_handler = logging.StreamHandler()
-        console_handler.setLevel(logging.INFO)
         console_handler.setFormatter(format)
-        log_root.addHandler(console_handler)
-    try:
-        root_level_raw = settings.levels.pop("root")
-    except KeyError:
-        root_level_raw = None
-        log.warn(f"Using default root logger level (INFO)!")
-    try:
-        if root_level_raw:
-            root_level = _levels_dict[root_level_raw]
-            log.setLevel(root_level)
-    except KeyError:
-        log.error(f"Incorrect logging level passed! ({root_level})")
+        handlers.append(console_handler)
+    if "root" in settings.levels.keys():
+        try:
+            root_level = _levels_dict[settings.levels.pop("root")]
+        except:
+            root_level = logging.INFO    
+    else:
+        root_level = logging.INFO
+    log_root.setLevel(root_level)
+    for handler in handlers:
+        handler.setLevel(root_level)
+        log_root.addHandler(handler)
     for name, val in settings.levels.items():
-        _set_level(name, val, log)
-    return log
+        _set_level(name, val)
 
 _levels_dict = {
     "DEBUG": logging.DEBUG,
@@ -48,8 +48,9 @@ _levels_dict = {
     "ERROR": logging.ERROR
 }
 
-def _set_level(name:str, value:str, log):
+def _set_level(name:str, value:str):
     try:
         logging.getLogger(name).setLevel(_levels_dict[value])
+        log.warn(f"Settings logger for {name} --> level {value}")
     except KeyError:
         log.error(f"Incorrect logging level passed! ({value})")

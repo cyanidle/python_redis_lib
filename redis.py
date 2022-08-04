@@ -11,7 +11,8 @@ import functools
 from typing import Dict as Dict_t, List, Union
 from typing import Any
 from python_redis_lib.settings import RedisSettings, RedisEntries
-log = logging.getLogger("python_redis_lib.redis")
+
+log = logging.getLogger(__name__)
 
 BLOCK_DELAY = 0
 LOCALSTORAGE_NAME = "localstorage.ini"
