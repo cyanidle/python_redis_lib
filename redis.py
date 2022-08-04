@@ -102,12 +102,8 @@ class RedisClient():
             try:
                 await asyncio.sleep(5)
                 if self.connected:
-                    info_pub = await self.redis.xinfo_stream(self.output_stream_key)
-                    if info_pub["length"] > self.max_pub_length:
-                        await self.redis.xtrim(self.output_stream_key, self.max_pub_length)
-                    info_sub = await self.redis.xinfo_stream(self.commands_stream_key)
-                    if info_sub["length"] > self.max_sub_length:
-                        await self.redis.xtrim(self.commands_stream_key, self.max_sub_length)
+                    await self.redis.xtrim(self.output_stream_key, self.max_pub_length)
+                    await self.redis.xtrim(self.commands_stream_key, self.max_sub_length)
                 await asyncio.sleep(60)
             except aioredis.exceptions.ConnectionError:
                 self.connected = False
