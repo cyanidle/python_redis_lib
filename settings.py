@@ -75,6 +75,7 @@ class LoggingSettings:
     add_timestamp:bool = False
     enable_console:bool = True
     logfilename:str = "" #empty = do not use
+    enable_function_name: bool = False
 
 class Reader:
     def __init__(self, *, dir = "conf", file = "config.toml") -> None:
@@ -145,7 +146,8 @@ class Reader:
             levels=levels,
             add_timestamp = src.get("add_timestamp"),
             enable_console = src.get("enable_console"),
-            logfilename = src.get("logfilename")
+            logfilename = src.get("logfilename"),
+            enable_function_name= src.get("enable_function_name")
         )
 
     def parse(self, struct: Type, *args, **kwargs):
