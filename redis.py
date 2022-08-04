@@ -297,6 +297,8 @@ class RedisClient():
             return
         while True:
             try:
+                if not self.connected:
+                    await asyncio.sleep(1)
                 if self.connected and not self.stream_wr_queue.empty():
                     to_write = await self.processRedisWrQueue(self.stream_wr_queue)
                     if to_write:
@@ -341,6 +343,8 @@ class RedisClient():
             return
         while True:
             try:
+                if not self.connected:
+                    await asyncio.sleep(1)
                 if self.connected:
                     raw_resp = await self.redis.xread({self.commands_stream_key: self.last_id.raw}, block=BLOCK_DELAY)
                     if raw_resp:

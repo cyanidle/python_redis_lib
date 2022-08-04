@@ -68,6 +68,13 @@ class RedisSettings:
     max_pub_length: int = 50000
     max_sub_length: int = 50000 
 
+@dataclass (slots=True, kw_only=True)
+class LoggingSettings:
+    levels:dict = field(default_factory=lambda:dict())
+    add_timestamp:bool = False
+    enable_console:bool = True
+    logfilename:str = "" #empty = do not use
+
 class Reader:
     def __init__(self, *, dir = "conf", file = "config.toml") -> None:
         self.config_directory = dir
@@ -127,6 +134,18 @@ class Reader:
         result.max_pub_length = int(redis_dict.get("max_publish_length",result.max_pub_length))
         result.max_sub_length = int(redis_dict.get("max_commands_length",result.max_sub_length))
         return result
+
+    def parseLogging(self) -> LoggingSettings:
+        src:dict = self.config_dict.get("logging")
+        if src is None:
+            return None
+        levels = src.get("levels", dict())
+        return LoggingSettings(
+            levels=levels,
+            add_timestamp = src.get("add_timestamp"),
+            enable_console = src.get("enable_console"),
+            logfilename = src.get("logfilename")
+        )
 
     def parse(self, struct: Type, *args, **kwargs):
         """

@@ -6,6 +6,7 @@ import signal
 import sys
 import time
 import traceback
+log_lib = logging.getLogger("python_redis_lib")
 log = logging.getLogger("python_redis_lib.supervisor")
 
 class Supervisor:
@@ -96,3 +97,12 @@ class Supervisor:
             except:
                 log.error(f"Could not restart supervisor client {obj}, full reason:")
                 log.error(traceback.format_exc())
+
+def get_loop() -> asyncio.AbstractEventLoop:
+    if sys.version_info.major < 3:
+        raise RuntimeError("At least Python3 is required to run!")
+    if sys.version_info.minor >= 10:
+        ioloop = asyncio.new_event_loop()
+    else:
+        ioloop = asyncio.get_event_loop()
+    return ioloop
