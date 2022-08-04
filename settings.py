@@ -128,8 +128,8 @@ class Reader:
             current_dict:dict = self.config_dict
         redis_dict = current_dict.get("redis")
         result.commands_stream = redis_dict.get("commands_stream")
-        result.write_delay = redis_dict.get("write_delay")
-        result.read_delay = redis_dict.get("read_delay")
+        result.write_delay = redis_dict.get("write_delay", result.write_delay)
+        result.read_delay = redis_dict.get("read_delay", result.read_delay)
         result.output_stream = redis_dict.get("output_stream")
         result.host = redis_dict.get("host")
         result.port = redis_dict.get("port")
@@ -142,13 +142,13 @@ class Reader:
         if src is None:
             return None
         levels = src.get("levels", dict())
-        return LoggingSettings(
-            levels=levels,
-            add_timestamp = src.get("add_timestamp"),
-            enable_console = src.get("enable_console"),
-            logfilename = src.get("logfilename"),
-            enable_function_name= src.get("enable_function_name")
-        )
+        result =  LoggingSettings()
+        result.levels = levels
+        result.add_timestamp = src.get("add_timestamp", result.add_timestamp)
+        result.enable_console = src.get("enable_console", result.enable_console)
+        result.logfilename = src.get("logfilename", result.logfilename)
+        result.enable_function_name= src.get("enable_function_name", result.enable_function_name)
+        return result
 
     def parse(self, struct: Type, *args, **kwargs):
         """
