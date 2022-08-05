@@ -38,8 +38,6 @@ class RedisClient():
         self.port = settings.port
         self.max_pub_length = settings.max_pub_length
         self.max_sub_length = settings.max_sub_length
-        self.read_delay = settings.read_delay
-        self.write_delay = settings.write_delay
         self.ioloop = ioloop
         self.commands_stream_key = settings.commands_stream
         self.output_stream_key = settings.output_stream
@@ -316,7 +314,6 @@ class RedisClient():
                 if coroutines.iscoroutine(coro):
                     await coro 
             self.last_id = last_id
-        await asyncio.sleep(self.read_delay)
 
 @dataclass
 class StreamId:
