@@ -41,7 +41,7 @@ class RedisClient():
         self.ioloop = ioloop
         self.commands_stream_key = settings.commands_stream
         self.output_stream_key = settings.output_stream
-        self.connected = False
+        self._connected = False
         url = f'redis://{self.host}:{self.port}'
         log.info(f"Using url: {url}. Please, call run() method!")
         self.redis: aioredis.Redis = aioredis.from_url(url, decode_responses=True)
@@ -52,6 +52,16 @@ class RedisClient():
             self._write_cb = self._def_cb
         else:
             self._write_cb = write_cb
+
+    @property
+    def connected(self):
+        return self._connected
+
+    @connected.setter
+    def connected(self,value):
+        if self._connected!=value:
+            log.warn(f"Redis Client is now Connected --> {value}")
+        self._connected = value
 
     async def _def_cb(self, command: dict):
         log.warn(f"Got command from stream {self.commands_stream_key}, but not handled (write callback not set!)")
@@ -90,8 +100,10 @@ class RedisClient():
             try:
                 await asyncio.sleep(5)
                 if self.connected:
-                    await self.redis.xtrim(self.output_stream_key, self.max_pub_length)
-                    await self.redis.xtrim(self.commands_stream_key, self.max_sub_length)
+                    if self.output_stream_key:
+                        await self.redis.xtrim(self.output_stream_key, self.max_pub_length)
+                    if self.commands_stream_key:
+                        await self.redis.xtrim(self.commands_stream_key, self.max_sub_length)
                 await asyncio.sleep(60)
             except aioredis.exceptions.ConnectionError:
                 self.connected = False
@@ -195,7 +207,7 @@ class RedisClient():
                     return    
             await self.redis.set(key, info)
         else:
-            log.warn("SET called while not connected!")
+            log.warn("SET called without info!")
             await asyncio.sleep(0.05)
             return
 
@@ -205,58 +217,58 @@ class RedisClient():
         if not info is None:
             await self.redis.sadd(set_key, *info)
         else:
-            log.warn("SADD Append called while not connected!")
+            log.warn("SADD Append called without info!")
             await asyncio.sleep(0.05)
             return
 
     @async_oneshot
     @async_handle_exceptions(redis_hadler)
     async def getSetCache(self, set_key:str)->Union[list,None]:
-        if self.connected:
+        if set_key:
             return await self.redis.smembers(set_key)
         else:
-            log.warn("SMEMBERS called while not connected!")
+            log.warn("SMEMBERS called without set_key!")
             await asyncio.sleep(0.05)
             return None
 
     @async_oneshot
     @async_handle_exceptions(redis_hadler)
-    async def addToHash(self, hash_key,info:dict):
-        if self.connected and not info is None:
+    async def addToHash(self, hash_key, info:dict):
+        if not info is None:
             await self.redis.hmset(hash_key, info)
         else:
-            log.warn("HMSET called while not connected!")
+            log.warn("HMSET called without info!")
             await asyncio.sleep(0.05)
             return
 
     @async_oneshot
     @async_handle_exceptions(redis_hadler)
     async def getHashCache(self, hash_key:str) -> dict:
-        if self.connected:
+        if hash_key:
             raw_dict = await self.redis.hgetall(hash_key)
             return raw_dict
         else:
-            log.warn("HGETALL called while not connected!")
+            log.warn("HGETALL called with empty hash_key!")
             await asyncio.sleep(0.05)
             return
 
     @async_oneshot
     @async_handle_exceptions(redis_hadler)
     async def deleteKey(self, key:str):
-        if self.connected:
+        if key:
             await self.redis.delete(key)
         else:
-            log.warn("DEL called while not connected!")
+            log.warn("DEL called with empty key!")
             await asyncio.sleep(0.05)
             return
 
     @async_oneshot
     @async_handle_exceptions(redis_hadler)
     async def deleteSetMembers(self, set:str, *values):
-        if self.connected and not values is None:
+        if not values is None:
             await self.redis.srem(set, *values)
         else:
-            log.warn("SREM called while not connected!")
+            log.warn("SREM called without values!")
             await asyncio.sleep(0.05)
             return
 
