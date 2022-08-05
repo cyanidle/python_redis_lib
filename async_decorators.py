@@ -106,7 +106,7 @@ def async_repeating_task(*, delay:float, on_shutdown = None, logger = log):
         return repeating_wrapper
     return _async_repeating_task
 
-def async_handle_exceptions(handler):
+def async_handle_exceptions(handler, *, pass_kwargs = {}):
     """
     Handler is a function, that accepts a coroutine and its *args, **kwargs
     --\n
@@ -119,21 +119,21 @@ def async_handle_exceptions(handler):
     ----------------------------\n
     Handler should look like:
     --\n
-    async def handler(coro):
+    async def handler(coro, *args, **kwargs):
         try:
-            if my_condition():
-                return await coro    <--- Dont forget 'return'
+            if my_condition(*args):     <--- You can used passed arguments!
+                return await coro(*args, **kwargs)    <--- Dont forget 'return'
             else:
                 raise LoopSleep(1)
         except MyException as e:
             handle_my_error(e)
     """
-    def _async_handle_exceptions(func):
+    def _async_handle_exceptions(func, *, passed_kwargs = {}):
         @functools.wraps(func)
         async def _exception_handle_impl(*args, **kwargs):
             try:
-                return await handler(func(*args, **kwargs), *args, **kwargs)
+                return await handler(func, *args, **kwargs)
             except:
                 raise
         return _exception_handle_impl
-    return _async_handle_exceptions
+    return functools.partial(_async_handle_exceptions, passed_kwargs = pass_kwargs)

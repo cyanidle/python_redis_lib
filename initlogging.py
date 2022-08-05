@@ -53,6 +53,6 @@ _levels_dict = {
 def _set_level(name:str, value:str):
     try:
         logging.getLogger(name).setLevel(_levels_dict[value])
-        log.warn(f"Settings logger for {name} --> level {value}")
+        log.warn(f"Setting logger level for {name} --> {value}")
     except KeyError:
         log.error(f"Incorrect logging level passed! ({value})")

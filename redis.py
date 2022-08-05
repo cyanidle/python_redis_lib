@@ -2,6 +2,7 @@
 from asyncio import coroutines
 from dataclasses import dataclass, field
 import asyncio
+from sys import call_tracing
 import aioredis
 import logging
 import logging.handlers
@@ -10,7 +11,7 @@ import functools
 from typing import Dict as Dict_t, List, Union
 from typing import Any
 
-from async_decorators import LoopContinue, LoopSleep, LoopReturn, async_handle_exceptions, async_oneshot, async_repeating_task
+from .async_decorators import LoopContinue, LoopSleep, LoopReturn, async_handle_exceptions, async_oneshot, async_repeating_task
 from .settings import RedisSettings, RedisEntries
 
 log = logging.getLogger(__name__)
@@ -22,10 +23,9 @@ async def redis_hadler(coro, *args, **kwargs):
     try:
         self = args[0]
         if self.connected:
-            return await coro
+            return await coro(*args, **kwargs)
         else:
-            log.error(f"Attempt to call Oneshot function, while redis not connected!")
-            log.error(f"Call Stack:\n{traceback.format_stack()}") 
+            await asyncio.sleep(1)
     except aioredis.exceptions.ConnectionError:
         self.connected = False
     except aioredis.exceptions.ResponseError:
@@ -61,11 +61,11 @@ class RedisClient():
         self._write_cb = cb
 
     def run(self):
-        log.info(f"Redis client INPUT_STREAM ({self.commands_stream_key}), OUTPUT_STREAM ({self.output_stream_key}) is running!")
         self.ioloop.create_task(self._checkConnection())
         self.ioloop.create_task(self._startStreamWriting())
         self.ioloop.create_task(self._startStreamReading())
         self.ioloop.create_task(self._startTrimming())
+        log.info(f"Redis client INPUT_STREAM ({self.commands_stream_key}), OUTPUT_STREAM ({self.output_stream_key}) is running!")
 
     async def write(self, info: Dict_t[str,Any]):
         """
@@ -178,24 +178,17 @@ class RedisClient():
         if not self.output_stream_key:
             log.warn("Fast write called without output stream configured!")
             return
-        if self.connected:
-            to_write = await self.processRedisWrList(entries_list)
-            if to_write:
-                log.info(f'Force writing to stream {self.output_stream_key}:')
-                log.info(to_write)
-                new_entry_id = await self.redis.xadd(self.output_stream_key, to_write)
-                self.need_cache_update = True
-                log.info(f'Station stream entry added: {new_entry_id}')
-            await asyncio.sleep(self.write_delay)
-        else:
-            log.warn("Fast stream write called while not connected!")
-            await asyncio.sleep(0.05)
-            return
+        to_write = await self.processRedisWrList(entries_list)
+        if to_write:
+            log.info(f'Force writing to stream {self.output_stream_key}:')
+            log.info(to_write)
+            new_entry_id = await self.redis.xadd(self.output_stream_key, to_write)
+            log.info(f'Station stream entry added: {new_entry_id}')
 
     @async_oneshot
     @async_handle_exceptions(redis_hadler)
     async def saveKeyVal(self, key:str, info:str, *, filtered:bool = False):
-        if self.connected and not info is None:
+        if not info is None:
             if filtered:
                 current = await self.redis.get(key)
                 if str(current) == str(info):
@@ -209,7 +202,7 @@ class RedisClient():
     @async_oneshot
     @async_handle_exceptions(redis_hadler)
     async def addToSet(self, set_key:str, *info:list):
-        if self.connected and not info is None:
+        if not info is None:
             await self.redis.sadd(set_key, *info)
         else:
             log.warn("SADD Append called while not connected!")
@@ -276,16 +269,13 @@ class RedisClient():
         The hash-key for (device:field) is (output stream key):(device)
         """
         if not self.output_stream_key:
-            raise LoopReturn("Leaving ")
-        if not self.connected:
-            raise LoopSleep(1)
+            raise LoopReturn("No output stream given! Leaving task...")
         while not self.stream_wr_queue.empty():
             to_write = await self.processRedisWrQueue(self.stream_wr_queue)
             if to_write:
                 log.info(f'Writing to stream {self.output_stream_key}:')
                 log.info(to_write)
                 new_entry_id = await self.redis.xadd(self.output_stream_key, to_write)
-                self.need_cache_update = True
                 log.info(f'{self.output_stream_key} stream entry added: {new_entry_id}')
             await asyncio.sleep(0)
         else:
@@ -296,8 +286,6 @@ class RedisClient():
     async def _startStreamReading(self):
         if not self.commands_stream_key:
             raise LoopReturn("No input stream passed --> Aborting reading")
-        if not self.connected:
-            raise LoopSleep(1)
         raw_resp = await self.redis.xread({self.commands_stream_key: self.last_id.raw}, block=BLOCK_DELAY)
         if raw_resp:
             resp = (raw_resp)[0][1:]
