@@ -60,7 +60,7 @@ class RedisClient():
     @connected.setter
     def connected(self,value):
         if self._connected!=value:
-            log.warn(f"Redis Client is now Connected --> {value}")
+            log.warn(f"Redis Client (IN:{self.commands_stream_key}; OUT:{self.output_stream_key}) is now Connected --> {value}")
         self._connected = value
 
     async def _def_cb(self, command: dict):
