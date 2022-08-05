@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 from asyncio import coroutines
-import configparser
 from dataclasses import dataclass, field
 import asyncio
 import aioredis
@@ -10,36 +9,28 @@ import traceback
 import functools
 from typing import Dict as Dict_t, List, Union
 from typing import Any
-from python_redis_lib.settings import RedisSettings, RedisEntries
+
+from async_decorators import LoopContinue, LoopSleep, LoopReturn, async_handle_exceptions, async_oneshot, async_repeating_task
+from .settings import RedisSettings, RedisEntries
 
 log = logging.getLogger(__name__)
 
 BLOCK_DELAY = 0
-LOCALSTORAGE_NAME = "localstorage.ini"
 ENABLE_LOCALSTORAGE = False
 
-def redis_oneshot(func):
-    @functools.wraps(func)
-    async def oneshot_wrapper(*args, **kwargs):
-        try:
-            self = args[0]
-            if self.connected:
-                return await func(*args, **kwargs)
-            else:
-                log.error(f"Attempt to call Oneshot function, while redis not connected!")
-                log.error(f"Call Stack:\n{traceback.format_stack()}") 
-        except KeyboardInterrupt:
-            log.info('Ctrl-C process shutdown requested. Closing...')
-            await self.shutdownHook()
-        except aioredis.exceptions.ConnectionError:
-            self.connected = False
-        except asyncio.exceptions.CancelledError:
-            raise
-        except:
-            log.error("Error occured:")
-            log.error(traceback.format_exc())
-            raise
-    return oneshot_wrapper
+async def redis_hadler(coro, *args, **kwargs):
+    try:
+        self = args[0]
+        if self.connected:
+            return await coro
+        else:
+            log.error(f"Attempt to call Oneshot function, while redis not connected!")
+            log.error(f"Call Stack:\n{traceback.format_stack()}") 
+    except aioredis.exceptions.ConnectionError:
+        self.connected = False
+    except aioredis.exceptions.ResponseError:
+        self.connected = False
+        raise LoopSleep(1)
 
 class RedisClient():
     def __init__(self, settings: RedisSettings, *, ioloop:asyncio.AbstractEventLoop, write_cb = None):
@@ -58,7 +49,6 @@ class RedisClient():
         self.redis: aioredis.Redis = aioredis.from_url(url, decode_responses=True)
         self.stream_wr_queue:asyncio.Queue[Dict_t[str,Any]] = asyncio.Queue()
         self.shutdown = False
-        self.config = configparser.ConfigParser()
         self.last_id = StreamId("$")
         if write_cb is None:
             self._write_cb = self._def_cb
@@ -74,7 +64,6 @@ class RedisClient():
 
     def run(self):
         log.info(f"Redis client INPUT_STREAM ({self.commands_stream_key}), OUTPUT_STREAM ({self.output_stream_key}) is running!")
-        self.ioloop.create_task(self._startLocalSaves())
         self.ioloop.create_task(self._checkConnection())
         self.ioloop.create_task(self._startStreamWriting())
         self.ioloop.create_task(self._startStreamReading())
@@ -120,7 +109,6 @@ class RedisClient():
                 log.error(traceback.format_exc())
                 raise  
 
-
     async def _checkConnection(self):
         num_tries = 0
         while True:
@@ -142,23 +130,8 @@ class RedisClient():
                 log.error("Error occured:")
                 log.error(traceback.format_exc())
                 raise
-                
-                
-    def getLastId(self):
-        self.config.read(LOCALSTORAGE_NAME)
-        try:
-            return StreamId(self.config[self.commands_stream_key]["last_id"])
-        except:
-            log.warn("No last id found in localstorage file, reading all commands!")
-            return StreamId()
-
-    def saveConfig(self):
-        if ENABLE_LOCALSTORAGE:
-            with open(LOCALSTORAGE_NAME, "w") as configfile:
-                self.config.write(configfile)
 
     async def shutdownHook(self):
-        self.saveConfig()
         if not self.shutdown:
             await self.redis.close()
             self.connected = False
@@ -201,7 +174,8 @@ class RedisClient():
         return result
 
 
-    @redis_oneshot
+    @async_oneshot
+    @async_handle_exceptions(redis_hadler)
     async def fastStreamWrite(self, entries_list:List[dict]):
         if not self.output_stream_key:
             log.warn("Fast write called without output stream configured!")
@@ -220,7 +194,8 @@ class RedisClient():
             await asyncio.sleep(0.05)
             return
 
-    @redis_oneshot
+    @async_oneshot
+    @async_handle_exceptions(redis_hadler)
     async def saveKeyVal(self, key:str, info:str, *, filtered:bool = False):
         if self.connected and not info is None:
             if filtered:
@@ -233,7 +208,8 @@ class RedisClient():
             await asyncio.sleep(0.05)
             return
 
-    @redis_oneshot
+    @async_oneshot
+    @async_handle_exceptions(redis_hadler)
     async def addToSet(self, set_key:str, *info:list):
         if self.connected and not info is None:
             await self.redis.sadd(set_key, *info)
@@ -242,7 +218,8 @@ class RedisClient():
             await asyncio.sleep(0.05)
             return
 
-    @redis_oneshot
+    @async_oneshot
+    @async_handle_exceptions(redis_hadler)
     async def getSetCache(self, set_key:str)->Union[list,None]:
         if self.connected:
             return await self.redis.smembers(set_key)
@@ -251,7 +228,8 @@ class RedisClient():
             await asyncio.sleep(0.05)
             return None
 
-    @redis_oneshot
+    @async_oneshot
+    @async_handle_exceptions(redis_hadler)
     async def addToHash(self, hash_key,info:dict):
         if self.connected and not info is None:
             await self.redis.hmset(hash_key, info)
@@ -260,7 +238,8 @@ class RedisClient():
             await asyncio.sleep(0.05)
             return
 
-    @redis_oneshot
+    @async_oneshot
+    @async_handle_exceptions(redis_hadler)
     async def getHashCache(self, hash_key:str) -> dict:
         if self.connected:
             raw_dict = await self.redis.hgetall(hash_key)
@@ -270,7 +249,8 @@ class RedisClient():
             await asyncio.sleep(0.05)
             return
 
-    @redis_oneshot
+    @async_oneshot
+    @async_handle_exceptions(redis_hadler)
     async def deleteKey(self, key:str):
         if self.connected:
             await self.redis.delete(key)
@@ -279,7 +259,8 @@ class RedisClient():
             await asyncio.sleep(0.05)
             return
 
-    @redis_oneshot
+    @async_oneshot
+    @async_handle_exceptions(redis_hadler)
     async def deleteSetMembers(self, set:str, *values):
         if self.connected and not values is None:
             await self.redis.srem(set, *values)
@@ -288,6 +269,8 @@ class RedisClient():
             await asyncio.sleep(0.05)
             return
 
+    @async_repeating_task(delay=0)
+    @async_handle_exceptions(redis_hadler)
     async def _startStreamWriting(self):
         """
         Cached writing using autogenerated hash key.
@@ -295,89 +278,45 @@ class RedisClient():
         The hash-key for (device:field) is (output stream key):(device)
         """
         if not self.output_stream_key:
-            return
-        while True:
-            try:
-                if not self.connected:
-                    await asyncio.sleep(1)
-                if self.connected and not self.stream_wr_queue.empty():
-                    to_write = await self.processRedisWrQueue(self.stream_wr_queue)
-                    if to_write:
-                        log.info(f'Writing to stream {self.output_stream_key}:')
-                        log.info(to_write)
-                        new_entry_id = await self.redis.xadd(self.output_stream_key, to_write)
-                        self.need_cache_update = True
-                        log.info(f'{self.output_stream_key} stream entry added: {new_entry_id}')
-                    await asyncio.sleep(self.write_delay)
-                else:
-                    await asyncio.sleep(self.write_delay)
-            except KeyboardInterrupt:
-                log.info('Ctrl-C process shutdown requested. Closing...')
-                await self.shutdownHook()
-            except aioredis.exceptions.ConnectionError:
-                self.connected = False
-            except asyncio.exceptions.CancelledError:
-                raise
-            except:
-                log.error("Error occured:")
-                log.error(traceback.format_exc())
-                raise
-
-    async def _startLocalSaves(self):
-        if not ENABLE_LOCALSTORAGE:
-            return
-        while True:
-            try:
-                await asyncio.sleep(10)
-                log.info("Saving configuration...")
-                self.saveConfig()
-                await asyncio.sleep(50)
-            except asyncio.exceptions.CancelledError:
-                raise
-            except:
-                log.error("Error occured:")
-                log.error(traceback.format_exc())
-                raise
-
+            raise LoopReturn("Leaving ")
+        if not self.connected:
+            raise LoopSleep(1)
+        while not self.stream_wr_queue.empty():
+            to_write = await self.processRedisWrQueue(self.stream_wr_queue)
+            if to_write:
+                log.info(f'Writing to stream {self.output_stream_key}:')
+                log.info(to_write)
+                new_entry_id = await self.redis.xadd(self.output_stream_key, to_write)
+                self.need_cache_update = True
+                log.info(f'{self.output_stream_key} stream entry added: {new_entry_id}')
+            await asyncio.sleep(0)
+        else:
+            await asyncio.sleep(0.2)
+    
+    @async_repeating_task(delay=0)
+    @async_handle_exceptions(redis_hadler)
     async def _startStreamReading(self):
         if not self.commands_stream_key:
-            return
-        while True:
-            try:
-                if not self.connected:
-                    await asyncio.sleep(1)
-                if self.connected:
-                    raw_resp = await self.redis.xread({self.commands_stream_key: self.last_id.raw}, block=BLOCK_DELAY)
-                    if raw_resp:
-                        resp = (raw_resp)[0][1:]
-                    else:
-                        await asyncio.sleep(self.read_delay)
-                        continue
-                    last_id = StreamId()
-                    for subresp in resp:
-                        for (raw_current_id, entry) in subresp:
-                            current_id = StreamId(raw_current_id)
-                            if current_id > last_id:
-                                last_id = current_id
-                            try:
-                                coro = self._write_cb(entry)
-                                if coroutines.iscoroutine(coro):
-                                    await coro 
-                            except TypeError:
-                                log.error(f"Callback function is not an asyncio coroutine!")
-                        ##
-                        self.config[self.commands_stream_key] = {"last_id": last_id.raw}
-                        self.last_id = last_id
-                        ##
-                await asyncio.sleep(self.read_delay)
-            except asyncio.exceptions.CancelledError:
-                raise
-            except aioredis.exceptions.ConnectionError:
-                self.connected = False
-            except:
-                log.error("Error occured:")
-                log.error(traceback.format_exc())
-                raise
+            raise LoopReturn("No input stream passed --> Aborting reading")
+        if not self.connected:
+            raise LoopSleep(1)
+        raw_resp = await self.redis.xread({self.commands_stream_key: self.last_id.raw}, block=BLOCK_DELAY)
+        if raw_resp:
+            resp = (raw_resp)[0][1:]
+        else:
+            await asyncio.sleep(self.read_delay)
+            raise LoopContinue
+        last_id = StreamId()
+        for subresp in resp:
+            for (raw_current_id, entry) in subresp:
+                current_id = StreamId(raw_current_id)
+                if current_id > last_id:
+                    last_id = current_id
+                coro = self._write_cb(entry)
+                if coroutines.iscoroutine(coro):
+                    await coro 
+            self.last_id = last_id
+        await asyncio.sleep(self.read_delay)
 
 @dataclass
 class StreamId:

@@ -64,7 +64,6 @@ class RedisSettings:
     output_stream: str = ""
     host: str = "127.0.0.1"
     port: int = 6300
-    write_delay: float = 1
     read_delay: float = 0.5
     max_pub_length: int = 50000
     max_sub_length: int = 50000 
@@ -128,7 +127,6 @@ class Reader:
             current_dict:dict = self.config_dict
         redis_dict = current_dict.get("redis")
         result.commands_stream = redis_dict.get("commands_stream")
-        result.write_delay = redis_dict.get("write_delay", result.write_delay)
         result.read_delay = redis_dict.get("read_delay", result.read_delay)
         result.output_stream = redis_dict.get("output_stream")
         result.host = redis_dict.get("host")

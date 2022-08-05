@@ -3,7 +3,7 @@ import logging
 import logging.handlers
 import os.path
 from typing import List
-from python_redis_lib.settings import LoggingSettings
+from .settings import LoggingSettings
 
 log_root = logging.getLogger()
 log = logging.getLogger(__name__)
@@ -17,7 +17,7 @@ def initLogging(caller_file:str, *,  settings: LoggingSettings = LoggingSettings
     if settings.add_timestamp:
         format_str = '%(asctime)-15s ' + format_str
     if settings.enable_function_name:
-        format_str+= '   <-- %(funcName)s()'
+        format_str += '   <-- %(funcName)s()'
     format = logging.Formatter(format_str)
     if settings.logfilename:
         logfilename = os.path.join(os.path.dirname(os.path.realpath(caller_file)), *(settings.logfilename.split("/")))
