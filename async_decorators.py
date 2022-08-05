@@ -27,12 +27,21 @@ class LoopReturn(ReapeatingControlExceptions):
 
 class LoopSleep(ReapeatingControlExceptions):
     """(async_repeating_task) Raise to restart task after delay"""
-    def __init__(self, seconds:float, *args: object) -> None:
+    def __init__(self, seconds:float = 1, *args: object) -> None:
         """(async_repeating_task) Raise to restart task after delay"""
         self.seconds = seconds
         super().__init__(*args)
 
 def async_oneshot(func = None, **kwargs):
+    """
+    This decorator handles exceptions for a coroutine, which is meant to run once
+    --\n
+    @async_oneshot can be useв with or without Key-Word args.
+
+    Possible Key-Word Arguments:
+        logger: override logger with one from source moudle
+        on_shutdown: coroutine or plain callback which is run on fail
+    """
     logger:logging.Logger = kwargs.get("logger") or log
     on_shutdown = kwargs.get("on_shutdown")
     def _async_oneshot(func):
@@ -53,11 +62,12 @@ def async_oneshot(func = None, **kwargs):
             except asyncio.exceptions.CancelledError:
                 raise
             except Exception as e:
-                logger.error("Unexpected error occured:")
-                logger.error(traceback.format_exc())
                 if isinstance(e, ReapeatingControlExceptions):
                     logger.error(f"Exceptions for controlling @async_repeating_task should not be passed to @async_oneshot")
-                else:                    
+                else:
+                    logger.error("Unexpected error occured:")
+                    logger.error(traceback.format_exc())
+                    await shutdownHook()                    
                     raise e
         return oneshot_wrapper
     if kwargs:
@@ -65,6 +75,15 @@ def async_oneshot(func = None, **kwargs):
     return _async_oneshot(func)
 
 def async_repeating_task(*, delay:float, on_shutdown = None, logger = log):
+    """
+    This decorator handles exceptions for a coroutine, which is meant to run infinitely
+    --\n
+    @async_repeating_task need 'delay' kwarg.
+
+    Possible Aux Key-Word Arguments:
+        logger: override logger with one from source moudle
+        on_shutdown: coroutine or plain callback which is run on fail
+    """
     def _async_repeating_task(func):
         async def shutdownHook():
             if on_shutdown is None:
@@ -100,6 +119,7 @@ def async_repeating_task(*, delay:float, on_shutdown = None, logger = log):
             except asyncio.exceptions.CancelledError:
                 raise
             except:
+                await shutdownHook()
                 logger.error("Unexpected error occured:")
                 logger.error(traceback.format_exc())
                 raise
