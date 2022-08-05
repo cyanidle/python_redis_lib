@@ -303,6 +303,11 @@ class RedisClient():
                     await coro 
             self.last_id = last_id
 
+    async def handleTerm(self):
+        while not self.stream_wr_queue.empty():
+            to_write = await self.processRedisWrQueue(self.stream_wr_queue)
+            await self.fastStreamWrite(to_write)
+
 @dataclass
 class StreamId:
     raw: str = "0-0"

@@ -5,7 +5,7 @@ import logging
 import traceback
 import asyncio
 
-log = logging.getLogger(__name__)
+_async_decorators_log = logging.getLogger(__name__)
 
 class ReapeatingControlExceptions(Exception):
     """(async_repeating_task) Base class for repeating task control Exceptions"""
@@ -42,7 +42,7 @@ def async_oneshot(func = None, **kwargs):
         logger: override logger with one from source moudle
         on_shutdown: coroutine or plain callback which is run on fail
     """
-    logger:logging.Logger = kwargs.get("logger") or log
+    logger:logging.Logger = kwargs.get("logger") or _async_decorators_log
     on_shutdown = kwargs.get("on_shutdown")
     def _async_oneshot(func):
         async def shutdownHook():
@@ -74,13 +74,12 @@ def async_oneshot(func = None, **kwargs):
         return _async_oneshot
     return _async_oneshot(func)
 
-def async_repeating_task(*, delay:float, on_shutdown = None, logger = log):
+def async_repeating_task(func = None, *, delay:float = 0, on_shutdown = None, logger = _async_decorators_log):
     """
     This decorator handles exceptions for a coroutine, which is meant to run infinitely
     --\n
-    @async_repeating_task need 'delay' kwarg.
-
-    Possible Aux Key-Word Arguments:
+    Possible Key-Word Arguments:
+        delay: (default = 0) delay between each loop iteration
         logger: override logger with one from source moudle
         on_shutdown: coroutine or plain callback which is run on fail
     """
@@ -91,7 +90,7 @@ def async_repeating_task(*, delay:float, on_shutdown = None, logger = log):
             else:
                 coro = on_shutdown
                 if coroutines.iscoroutine(coro):
-                    await coro
+                    await coro              
         @functools.wraps(func)
         async def repeating_wrapper(*args, **kwargs):
             try:
@@ -124,7 +123,9 @@ def async_repeating_task(*, delay:float, on_shutdown = None, logger = log):
                 logger.error(traceback.format_exc())
                 raise
         return repeating_wrapper
-    return _async_repeating_task
+    if func is None:
+        return _async_repeating_task
+    return _async_repeating_task(func)
 
 def async_handle_exceptions(handler, *, pass_kwargs = {}):
     """
