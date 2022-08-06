@@ -36,11 +36,12 @@ def async_oneshot(func = None, **kwargs):
     """
     This decorator handles exceptions for a coroutine, which is meant to run once
     --\n
-    @async_oneshot can be useв with or without Key-Word args.
+    @async_oneshot can be used with or without Key-Word args.
 
     Possible Key-Word Arguments:
-        logger: override logger with one from source moudle
-        on_shutdown: coroutine or plain callback which is run on fail
+    --\n
+    logger: override logger with one from source moudle
+    on_shutdown: coroutine or plain callback which is run on fail
     """
     logger:logging.Logger = kwargs.get("logger") or _async_decorators_log
     on_shutdown = kwargs.get("on_shutdown")
@@ -79,9 +80,10 @@ def async_repeating_task(func = None, *, delay:float = 0, on_shutdown = None, lo
     This decorator handles exceptions for a coroutine, which is meant to run infinitely
     --\n
     Possible Key-Word Arguments:
-        delay: (default = 0) delay between each loop iteration
-        logger: override logger with one from source moudle
-        on_shutdown: coroutine or plain callback which is run on fail
+    --\n
+    delay: (default = 0) delay between each loop iteration
+    logger: override logger with one from source moudle
+    on_shutdown: coroutine or plain callback which is run on fail
     """
     def _async_repeating_task(func):
         async def shutdownHook():
