@@ -47,7 +47,8 @@ _levels_dict = {
     "DEBUG": logging.DEBUG,
     "INFO": logging.INFO,
     "WARNING": logging.WARNING,
-    "ERROR": logging.ERROR
+    "ERROR": logging.ERROR,
+    "CRITICAL" : logging.CRITICAL
 }
 
 def _set_level(name:str, value:str):
@@ -56,3 +57,5 @@ def _set_level(name:str, value:str):
         log.warn(f"Setting logger level for {name} --> {value}")
     except KeyError:
         log.error(f"Incorrect logging level passed! ({value})")
+
+
