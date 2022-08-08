@@ -115,7 +115,7 @@ class Reader:
             except:
                 log.warn(f"Error reading {self.configPath()}!")
     def _read(self, file:str = None):
-        with open(self.configPath(file),"r") as f:
+        with open(self.configPath(file),"r",encoding="utf-8") as f:
                 return toml.load(f)
 
     def parseRedisSettings(self, *, top_dict:dict = None) -> RedisSettings:
