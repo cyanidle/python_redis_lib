@@ -64,9 +64,9 @@ def async_oneshot(func = None, **kwargs):
                 raise
             except Exception as e:
                 if isinstance(e, ReapeatingControlExceptions):
-                    logger.error(f"Exceptions for controlling @async_repeating_task should not be passed to @async_oneshot")
+                    logger.error(f"({func.__name__}) Exceptions for controlling @async_repeating_task should not be passed to @async_oneshot")
                 else:
-                    logger.error("Unexpected error occured:")
+                    logger.error(f"({func.__name__}) Unexpected error occured:")
                     logger.error(traceback.format_exc())
                     await shutdownHook()                    
                     raise e
@@ -96,23 +96,32 @@ def async_repeating_task(func = None, *, delay:float = 0, on_shutdown = None, lo
         @functools.wraps(func)
         async def repeating_wrapper(*args, **kwargs):
             try:
+                count = 10
+                loop = asyncio.get_running_loop()
+                start_time = loop.time()
                 while True:
+                    if count:
+                        count -= 1
+                        if not count:
+                            current = loop.time()
+                            if delay < 0.1 and current - start_time < 0.05 * 10:
+                                logger.warn(f"({func.__name__}) Time between loop iteration in @async_repeating_task is less, than 50 ms!")
+                                logger.warn(f"({func.__name__}) Possibly missing additional asyncio.sleep()")
                     try:
                         await func(*args, **kwargs)
                         await asyncio.sleep(delay)
                     except LoopContinue:
-                        await asyncio.sleep(0.01)
                         continue
                     except LoopReturn as e:
                         if e.args:
-                            logger.warn(f"Canceling repeating task. Reason: {e.args[0] or 'Not Given'}") 
+                            logger.warn(f"Canceling repeating task {func.__name__}. Reason: {e.args[0] or 'Not Given'}") 
                         return
                     except LoopSleep as sleep:
                         await asyncio.sleep(sleep.seconds)
                         continue
                     except Exception as e:
                         if isinstance(e, ReapeatingControlExceptions):
-                            logger.error(f"Repeating Control Exception not handled correctly!")
+                            logger.error(f"({func.__name__}) Repeating Control Exception not handled correctly!")
                         raise
             except KeyboardInterrupt:
                 logger.info('Ctrl-C process shutdown requested. Closing...')
@@ -121,7 +130,7 @@ def async_repeating_task(func = None, *, delay:float = 0, on_shutdown = None, lo
                 raise
             except:
                 await shutdownHook()
-                logger.error("Unexpected error occured:")
+                logger.error(f"({func.__name__}) Unexpected error occured:")
                 logger.error(traceback.format_exc())
                 raise
         return repeating_wrapper
@@ -144,8 +153,8 @@ def async_handle_exceptions(handler, *, pass_kwargs = {}):
     --\n
     async def handler(coro, *args, **kwargs):
         try:
-            if my_condition(*args):     <--- You can used passed arguments!
-                return await coro(*args, **kwargs)    <--- Dont forget 'return'
+            if my_condition(*args):                   <--- You can use passed arguments!
+                return await coro(*args, **kwargs)    <--- Dont forget 'return'!
             else:
                 raise LoopSleep(1)
         except MyException as e:

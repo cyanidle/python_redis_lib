@@ -214,7 +214,7 @@ class RedisClient():
     @async_oneshot
     @async_handle_exceptions(redis_hadler)
     async def addToSet(self, set_key:str, *info:list):
-        if not info is None:
+        if not info is None and not set_key is None:
             await self.redis.sadd(set_key, *info)
         else:
             log.warn("SADD Append called without info!")
