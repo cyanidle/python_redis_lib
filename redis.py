@@ -13,8 +13,9 @@ from typing import Any
 
 from .async_decorators import LoopContinue, LoopSleep, LoopReturn, async_handle_exceptions, async_oneshot, async_repeating_task
 from .settings import RedisSettings, RedisEntries
+from .supervisor import WorkerBase
 
-log = logging.getLogger(__name__)
+log = logging.getLogger("redis")
 
 BLOCK_DELAY = 0
 ENABLE_LOCALSTORAGE = False
@@ -22,17 +23,18 @@ ENABLE_LOCALSTORAGE = False
 async def redis_hadler(coro, *args, **kwargs):
     try:
         self = args[0]
-        if self.connected:
-            return await coro(*args, **kwargs)
-        else:
-            await asyncio.sleep(1)
+        while True:
+            if self.connected:
+                return await coro(*args, **kwargs)
+            else:
+                await asyncio.sleep(1)
     except aioredis.exceptions.ConnectionError:
         self.connected = False
     except aioredis.exceptions.ResponseError:
         self.connected = False
         raise LoopSleep(1)
 
-class RedisClient():
+class RedisClient(WorkerBase):
     def __init__(self, settings: RedisSettings, *, ioloop:asyncio.AbstractEventLoop, write_cb = None):
         self.host = settings.host
         self.port = settings.port

@@ -1,29 +1,43 @@
 # -*- coding: utf-8 -*-
 import traceback
 import toml
-import datetime as dt
-from abc import ABC, abstractmethod, abstractstaticmethod
-import asyncio
+from abc import ABC
 from os import path
-from typing import Any, Type, Union
-from typing import Tuple as Tuple_t
+from typing import Union
 from typing import List as List_t
 from typing import Dict as Dict_t
-from dataclasses import KW_ONLY, dataclass, field
+from dataclasses import dataclass, field
 import logging
 import logging.handlers
+from inspect import signature
 
-log = logging.getLogger(__name__)
+log = logging.getLogger("settings")
 
 class SettingsStructTemplate(ABC):
-    @abstractstaticmethod
-    def parse(*args, **kwargs):
-        raise NotImplementedError
+    @classmethod
+    def parse(cls, src_dict:dict, *args, **kwargs):
+        return cls.from_kwargs(**src_dict)        
+    @classmethod
+    def from_kwargs(cls, **kwargs):
+        cls_fields = {field for field in signature(cls).parameters}
+        native_args, new_args = {}, {}
+        for name, val in kwargs.items():
+            if name in cls_fields:
+                native_args[name] = val
+            else:
+                new_args[name] = val
+        try:
+            ret = cls(**native_args)
+            return ret
+        except TypeError as e:
+            log.error(f"Could not parse class: {cls.__name__}")
+            log.error(f"Reason: {e}")
+
 
 @dataclass (slots=True)
 class ConnectionSettings:
     host: str = "0.0.0.0"
-    port: int = 502
+    port: int = 0
 
 class RedisEntries:
     def __init__(self, raw_dict:Dict_t[str,Union[str,int]], stream_id : str, *, filter = True) -> None:
@@ -59,7 +73,7 @@ class RedisEntries:
 
     
 @dataclass (slots=True)
-class RedisSettings:
+class RedisSettings(SettingsStructTemplate):
     commands_stream: str = ""
     output_stream: str = ""
     host: str = "127.0.0.1"
@@ -68,7 +82,7 @@ class RedisSettings:
     max_sub_length: int = 50000 
 
 @dataclass (slots=True, kw_only=True)
-class LoggingSettings:
+class LoggingSettings(SettingsStructTemplate):
     levels:dict = field(default_factory=lambda:dict())
     add_timestamp:bool = False
     enable_console:bool = True
@@ -115,7 +129,7 @@ class Reader:
             except:
                 log.warn(f"Error reading {self.configPath()}!")
     def _read(self, file:str = None):
-        with open(self.configPath(file),"r",encoding="utf-8") as f:
+        with open(self.configPath(file),"r") as f:
                 return toml.load(f)
 
     def parseRedisSettings(self, *, top_dict:dict = None) -> RedisSettings:
@@ -146,16 +160,16 @@ class Reader:
         result.enable_function_name= src.get("enable_function_name", result.enable_function_name)
         return result
 
-    def parse(self, struct: Type, *args, **kwargs):
+    def parse(self, struct: SettingsStructTemplate, *args, key:str = None, **kwargs):
         """
         Used to call on struct class, which contains parse() method.
 
-        Passes itself as a 'reader' argument
+        Passes full file dictionary as the first argument
         """
         if not hasattr(struct, "parse") or not callable(struct.parse):
             log.error(f"Passed class does not contain parse() method!")
         else:
-            return struct.parse(*args, **kwargs, reader = self)
-
-
-    
+            if key:
+                return struct.parse(self.config_dict[key], *args, **kwargs)
+            else:
+                return struct.parse(self.config_dict, *args, **kwargs)

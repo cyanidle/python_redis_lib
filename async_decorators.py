@@ -5,7 +5,7 @@ import logging
 import traceback
 import asyncio
 
-_async_decorators_log = logging.getLogger(__name__)
+_async_decorators_log = logging.getLogger("async-decorators")
 
 class ReapeatingControlExceptions(Exception):
     """(async_repeating_task) Base class for repeating task control Exceptions"""
@@ -21,9 +21,9 @@ class LoopContinue(ReapeatingControlExceptions):
     
 class LoopReturn(ReapeatingControlExceptions):
     """(async_repeating_task) Raise to finish task"""
-    def __init__(self, *args: object) -> None:
+    def __init__(self, reason:str, *args: object) -> None:
         """(async_repeating_task) Raise to finish task"""
-        super().__init__(*args)
+        super().__init__(reason, *args)
 
 class LoopSleep(ReapeatingControlExceptions):
     """(async_repeating_task) Raise to restart task after delay"""

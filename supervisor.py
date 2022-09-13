@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+from abc import ABC, abstractmethod
 import asyncio
 import logging
 import logging.handlers
@@ -6,8 +7,18 @@ import signal
 import sys
 import time
 import traceback
+from typing import List
 
-log = logging.getLogger(__name__)
+log = logging.getLogger("supervisor")
+
+class WorkerBase(ABC):
+    @abstractmethod
+    def run(self):
+        raise NotImplementedError()
+
+    @abstractmethod
+    def handleTerm(self):
+        raise NotImplementedError()
 
 class Supervisor:
     """
@@ -30,10 +41,10 @@ class Supervisor:
             log.warn("Only one supervisor should be created!")
             return
         self._was_init = True
+        self.obj_list: List[WorkerBase] = []
         self.ioloop = ioloop
-        self.obj_list = list(args)
-        for obj in self.obj_list:
-            log.info(f"Adding {obj} to supervisor tracking")
+        for obj in list(args):
+            self.registerNew(obj)
         self.terminated = False
         ioloop.set_exception_handler(self.errorHook)
         if not sys.platform.startswith('win'):
@@ -76,6 +87,8 @@ class Supervisor:
         time.sleep(5)
         self._rerunAll()
     def registerNew(self, obj):
+        if not isinstance(obj, WorkerBase):
+            log.warn(f"Worker {obj} is not a subclass of WorkerBase (does not garantee restart methods implementations)!")
         self.obj_list.append(obj)
         log.info(f"Registered new object in supervising list '{obj}'")
     def remove(self,obj):
