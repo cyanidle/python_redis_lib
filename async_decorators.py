@@ -7,32 +7,32 @@ import asyncio
 
 _async_decorators_log = logging.getLogger("async-decorators")
 
-class ReapeatingControlExceptions(Exception):
+class _ReapeatingControlExceptions(Exception):
     """(async_repeating_task) Base class for repeating task control Exceptions"""
     def __init__(self, *args: object) -> None:
         """(async_repeating_task) Base class for repeating task control Exceptions"""
         super().__init__(*args)
 
-class LoopContinue(ReapeatingControlExceptions):
+class LoopContinue(_ReapeatingControlExceptions):
     """(async_repeating_task) Raise to restart task soon"""
     def __init__(self, *args: object) -> None:
         """(async_repeating_task) Raise to restart task soon"""
         super().__init__(*args)
     
-class LoopReturn(ReapeatingControlExceptions):
+class LoopReturn(_ReapeatingControlExceptions):
     """(async_repeating_task) Raise to finish task"""
     def __init__(self, reason:str, *args: object) -> None:
         """(async_repeating_task) Raise to finish task"""
         super().__init__(reason, *args)
 
-class LoopSleep(ReapeatingControlExceptions):
+class LoopSleep(_ReapeatingControlExceptions):
     """(async_repeating_task) Raise to restart task after delay"""
     def __init__(self, seconds:float = 1, *args: object) -> None:
         """(async_repeating_task) Raise to restart task after delay"""
         self.seconds = seconds
         super().__init__(*args)
 
-def async_oneshot(func = None, **kwargs):
+def async_oneshot(func = None, *, logger:logging.Logger = _async_decorators_log, on_shutdown = None):
     """
     This decorator handles exceptions for a coroutine, which is meant to run once
     --\n
@@ -43,8 +43,6 @@ def async_oneshot(func = None, **kwargs):
     logger: override logger with one from source moudle
     on_shutdown: coroutine or plain callback which is run on fail
     """
-    logger:logging.Logger = kwargs.get("logger") or _async_decorators_log
-    on_shutdown = kwargs.get("on_shutdown")
     def _async_oneshot(func):
         async def shutdownHook():
             if on_shutdown is None:
@@ -63,15 +61,15 @@ def async_oneshot(func = None, **kwargs):
             except asyncio.exceptions.CancelledError:
                 raise
             except Exception as e:
-                if isinstance(e, ReapeatingControlExceptions):
-                    logger.error(f"({func.__name__}) Exceptions for controlling @async_repeating_task should not be passed to @async_oneshot")
+                if isinstance(e, _ReapeatingControlExceptions):
+                    logger.error(f"({func.__name__}) Exceptions for controlling @async_repeating_task should not be passed to @async_oneshot!")
                 else:
                     logger.error(f"({func.__name__}) Unexpected error occured:")
                     logger.error(traceback.format_exc())
                     await shutdownHook()                    
                     raise e
         return oneshot_wrapper
-    if kwargs:
+    if func is None:
         return _async_oneshot
     return _async_oneshot(func)
 
@@ -120,7 +118,7 @@ def async_repeating_task(func = None, *, delay:float = 0, on_shutdown = None, lo
                         await asyncio.sleep(sleep.seconds)
                         continue
                     except Exception as e:
-                        if isinstance(e, ReapeatingControlExceptions):
+                        if isinstance(e, _ReapeatingControlExceptions):
                             logger.error(f"({func.__name__}) Repeating Control Exception not handled correctly!")
                         raise
             except KeyboardInterrupt:
@@ -152,13 +150,14 @@ def async_handle_exceptions(handler, *, pass_kwargs = {}):
     Handler should look like:
     --\n
     async def handler(coro, *args, **kwargs):
-        try:
-            if my_condition(*args):                   <--- You can use passed arguments!
-                return await coro(*args, **kwargs)    <--- Dont forget 'return'!
-            else:
-                raise LoopSleep(1)
-        except MyException as e:
-            handle_my_error(e)
+        while True:
+            try:
+                if my_condition(*args):                   <--- You can use passed arguments!
+                    return await coro(*args, **kwargs)    <--- Dont forget 'return'!
+                else:
+                    await asyncio.sleep(1)
+            except MyException as e:
+                handle_my_error(e)
     """
     def _async_handle_exceptions(func, *, passed_kwargs = {}):
         @functools.wraps(func)

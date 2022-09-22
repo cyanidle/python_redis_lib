@@ -13,11 +13,15 @@ log = logging.getLogger("supervisor")
 
 class WorkerBase(ABC):
     @abstractmethod
-    def run(self):
+    def __init__(self) -> None:
         raise NotImplementedError()
 
     @abstractmethod
-    def handleTerm(self):
+    def run(self) -> None:
+        raise NotImplementedError()
+
+    @abstractmethod
+    def handleTerm(self) -> None:
         raise NotImplementedError()
 
 class Supervisor:
@@ -36,7 +40,6 @@ class Supervisor:
     """
     _was_init = False
     def __init__(self, *args:object, ioloop: asyncio.AbstractEventLoop) -> None:
-        log = logging.getLogger(__name__)
         if self._was_init:
             log.warn("Only one supervisor should be created!")
             return

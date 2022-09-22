@@ -8,7 +8,7 @@ from .settings import LoggingSettings
 log_root = logging.getLogger()
 log = logging.getLogger("init-logging")
 
-def initLogging(caller_file:str, *,  settings: LoggingSettings = LoggingSettings()) -> logging.Logger:
+def initLogging(caller_file:str, *,  settings: LoggingSettings = LoggingSettings()) -> None:
     """
     Should be called with '__file__' as the first argument and 'module name' as in logging config as second!
     """

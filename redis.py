@@ -1,55 +1,88 @@
 # -*- coding: utf-8 -*-
 from asyncio import coroutines
-from dataclasses import dataclass, field
+from dataclasses import Field, dataclass, field
+from dataclasses import fields as datacls_fields
 import asyncio
-from sys import call_tracing
+from datetime import datetime
+from functools import lru_cache
 import aioredis
 import logging
 import logging.handlers
 import traceback
-import functools
-from typing import Dict as Dict_t, List, Union
+from typing import Dict, List, Tuple, Type, Union
 from typing import Any
-
-from .async_decorators import LoopContinue, LoopSleep, LoopReturn, async_handle_exceptions, async_oneshot, async_repeating_task
-from .settings import RedisSettings, RedisEntries
+from .async_decorators import *
+from .settings import RedisSettings, RedisEntries, SerializableDataclass, flatten_dict, nest_dict
 from .supervisor import WorkerBase
 
 log = logging.getLogger("redis")
 
 BLOCK_DELAY = 0
-ENABLE_LOCALSTORAGE = False
+
+class RedisSerialisable(SerializableDataclass):
+    deserialise_rules = {
+            str: lambda x: x,
+            datetime: lambda x: datetime.fromtimestamp(float(x)),
+            bool: lambda x: x == "true",
+            None: lambda x: None,
+        }
+    @classmethod
+    def deserialise(cls, source_dict: Dict[str, str], pedantic = True):
+        """
+        Deserialises from form {"key:key:key" : str(val)}
+        """
+        return super().deserialise(nest_dict(source_dict), deserialise_rules=cls.deserialise_rules, pedantic=pedantic)
+        
+
+    def serialise(self) -> Dict:
+        flat_dict:Dict[str, Union[datetime, bool, str]] = flatten_dict(super().serialise())
+        to_remove = []
+        for key, val in flat_dict.items():
+            if isinstance(val, bool):
+                flat_dict[key] = str(val).lower()
+            elif val is None:
+                to_remove.append(key)
+            elif isinstance(val, datetime):
+                flat_dict[key] = val.timestamp()
+            else:    
+                flat_dict[key] = str(val)
+        for te_remove_key in to_remove:
+            del flat_dict[te_remove_key]
+        return flat_dict
 
 async def redis_hadler(coro, *args, **kwargs):
-    try:
-        self = args[0]
-        while True:
+    while True:
+        try:
+            self:RedisClient = args[0]
             if self.connected:
                 return await coro(*args, **kwargs)
             else:
+                if not self._was_run:
+                    log.warn(f"Redis client used before run() method!")
+                    log.warn(f"Source for ^ :(Host: {self.host}, Port:{self.port},IN:{self.input_stream_key}, OUT:{self.output_stream_key})")
                 await asyncio.sleep(1)
-    except aioredis.exceptions.ConnectionError:
-        self.connected = False
-    except aioredis.exceptions.ResponseError:
-        self.connected = False
-        raise LoopSleep(1)
+        except (aioredis.exceptions.ConnectionError, aioredis.exceptions.ResponseError) as e:
+            self.connected = False
+            log.error(f"Error while getting responce from redis. Full reason: {e}")
 
 class RedisClient(WorkerBase):
     def __init__(self, settings: RedisSettings, *, ioloop:asyncio.AbstractEventLoop, write_cb = None):
         self.host = settings.host
         self.port = settings.port
+        self.name = settings.server.name
         self.max_pub_length = settings.max_pub_length
         self.max_sub_length = settings.max_sub_length
         self.ioloop = ioloop
-        self.commands_stream_key = settings.commands_stream
+        self.input_stream_key = settings.commands_stream
         self.output_stream_key = settings.output_stream
         self._connected = False
         url = f'redis://{self.host}:{self.port}'
         log.info(f"Using url: {url}. Please, call run() method!")
         self.redis: aioredis.Redis = aioredis.from_url(url, decode_responses=True)
-        self.stream_wr_queue:asyncio.Queue[Dict_t[str,Any]] = asyncio.Queue()
+        self.stream_wr_queue:asyncio.Queue[Dict[str,Any]] = asyncio.Queue()
         self.shutdown = False
         self.last_id = StreamId("$")
+        self._was_run = False
         if write_cb is None:
             self._write_cb = self._def_cb
         else:
@@ -62,11 +95,11 @@ class RedisClient(WorkerBase):
     @connected.setter
     def connected(self,value):
         if self._connected!=value:
-            log.warn(f"Redis Client (IN:{self.commands_stream_key}; OUT:{self.output_stream_key}) is now Connected --> {value}")
+            log.warn(f"Redis Client (IN:{self.input_stream_key}; OUT:{self.output_stream_key}) is now Connected --> {value}")
         self._connected = value
 
     async def _def_cb(self, command: dict):
-        log.warn(f"Got command from stream {self.commands_stream_key}, but not handled (write callback not set!)")
+        log.warn(f"Got command from stream {self.input_stream_key}, but not handled (write callback not set!)")
         log.warn(command)
 
     def setCommandsCallback(self, cb):
@@ -77,9 +110,10 @@ class RedisClient(WorkerBase):
         self.ioloop.create_task(self._startStreamWriting())
         self.ioloop.create_task(self._startStreamReading())
         self.ioloop.create_task(self._startTrimming())
-        log.info(f"Redis client INPUT_STREAM ({self.commands_stream_key}), OUTPUT_STREAM ({self.output_stream_key}) is running!")
+        self._was_run = True
+        log.info(f"Redis client INPUT_STREAM ({self.input_stream_key}), OUTPUT_STREAM ({self.output_stream_key}) is running!")
 
-    async def write(self, info: Dict_t[str,Any]):
+    async def write(self, info: Dict[str,Any]):
         """
         A method to be used as a callback to write to redis output Stream
         in format of dict {<domain:key> : val}.
@@ -88,7 +122,7 @@ class RedisClient(WorkerBase):
         """
         await self.stream_wr_queue.put(RedisEntries(info,self.output_stream_key))
 
-    async def writeUnfiltered(self, info: Dict_t[str,Any]):
+    async def write_unfiltered(self, info: Dict[str,Any]):
         """
         A method to be used as a callback to write to redis output Stream
         in format of dict {<domain:key> : val}.
@@ -97,29 +131,6 @@ class RedisClient(WorkerBase):
         """
         await self.stream_wr_queue.put(RedisEntries(info,self.output_stream_key, filter = False))
 
-    async def _startTrimming(self):
-        while True:
-            try:
-                await asyncio.sleep(5)
-                if self.connected:
-                    if self.output_stream_key:
-                        await self.redis.xtrim(self.output_stream_key, self.max_pub_length)
-                    if self.commands_stream_key:
-                        await self.redis.xtrim(self.commands_stream_key, self.max_sub_length)
-                await asyncio.sleep(60)
-            except aioredis.exceptions.ConnectionError:
-                self.connected = False
-                await asyncio.sleep(1)
-                continue
-            except asyncio.exceptions.CancelledError:
-                raise
-            except aioredis.exceptions.ResponseError:
-                await asyncio.sleep(60)
-                continue
-            except:
-                log.error("Error occured:")
-                log.error(traceback.format_exc())
-                raise  
 
     async def _checkConnection(self):
         num_tries = 0
@@ -132,8 +143,8 @@ class RedisClient(WorkerBase):
             except aioredis.exceptions.ConnectionError:
                 self.connected = False
                 num_tries += 1
-                if num_tries>5 and not (num_tries%10):
-                    log.error(f"Cannot connect to redis for {num_tries} seconds already")
+                if num_tries>=5 and not (num_tries%20) or (num_tries==5):
+                    log.error(f"{self.name}: Cannot connect to redis for {num_tries} seconds already")
                 await asyncio.sleep(1)
                 continue
             except asyncio.exceptions.CancelledError:
@@ -185,10 +196,20 @@ class RedisClient(WorkerBase):
                 result[key] = val
         return result
 
+    @async_repeating_task
+    @async_handle_exceptions(redis_hadler)
+    async def _startTrimming(self):
+        await asyncio.sleep(5)
+        if self.connected:
+            if self.output_stream_key:
+                await self.redis.xtrim(self.output_stream_key, self.max_pub_length)
+            if self.input_stream_key:
+                await self.redis.xtrim(self.input_stream_key, self.max_sub_length)
+        await asyncio.sleep(60)
 
     @async_oneshot
     @async_handle_exceptions(redis_hadler)
-    async def fastStreamWrite(self, entries_list:List[dict]):
+    async def fast_stream_write(self, entries_list:List[dict]):
         if not self.output_stream_key:
             log.warn("Fast write called without output stream configured!")
             return
@@ -201,7 +222,7 @@ class RedisClient(WorkerBase):
 
     @async_oneshot
     @async_handle_exceptions(redis_hadler)
-    async def saveKeyVal(self, key:str, info:str, *, filtered:bool = False):
+    async def save_key_val(self, key:str, info:str, *, filtered:bool = False):
         if not info is None:
             if filtered:
                 current = await self.redis.get(key)
@@ -215,7 +236,7 @@ class RedisClient(WorkerBase):
 
     @async_oneshot
     @async_handle_exceptions(redis_hadler)
-    async def addToSet(self, set_key:str, *info:list):
+    async def add_to_set(self, set_key:str, *info:list):
         if not info is None and not set_key is None:
             await self.redis.sadd(set_key, *info)
         else:
@@ -225,7 +246,7 @@ class RedisClient(WorkerBase):
 
     @async_oneshot
     @async_handle_exceptions(redis_hadler)
-    async def getSetCache(self, set_key:str)->Union[list,None]:
+    async def get_set_cache(self, set_key:str)->Union[list,None]:
         if set_key:
             return await self.redis.smembers(set_key)
         else:
@@ -235,7 +256,7 @@ class RedisClient(WorkerBase):
 
     @async_oneshot
     @async_handle_exceptions(redis_hadler)
-    async def addToHash(self, hash_key, info:dict):
+    async def add_to_hash(self, hash_key, info:dict):
         if not info is None:
             await self.redis.hmset(hash_key, info)
         else:
@@ -245,7 +266,7 @@ class RedisClient(WorkerBase):
 
     @async_oneshot
     @async_handle_exceptions(redis_hadler)
-    async def getHashCache(self, hash_key:str) -> dict:
+    async def get_hash_cache(self, hash_key:str) -> dict:
         if hash_key:
             raw_dict = await self.redis.hgetall(hash_key)
             return raw_dict
@@ -256,7 +277,7 @@ class RedisClient(WorkerBase):
 
     @async_oneshot
     @async_handle_exceptions(redis_hadler)
-    async def deleteKey(self, key:str):
+    async def delete_key(self, key:str):
         if key:
             await self.redis.delete(key)
         else:
@@ -266,7 +287,7 @@ class RedisClient(WorkerBase):
 
     @async_oneshot
     @async_handle_exceptions(redis_hadler)
-    async def deleteSetMembers(self, set:str, *values):
+    async def delete_set_members(self, set:str, *values):
         if not values is None:
             await self.redis.srem(set, *values)
         else:
@@ -298,9 +319,9 @@ class RedisClient(WorkerBase):
     @async_repeating_task(delay=0)
     @async_handle_exceptions(redis_hadler)
     async def _startStreamReading(self):
-        if not self.commands_stream_key:
+        if not self.input_stream_key:
             raise LoopReturn("No input stream passed --> Aborting reading")
-        raw_resp = await self.redis.xread({self.commands_stream_key: self.last_id.raw}, block=BLOCK_DELAY)
+        raw_resp = await self.redis.xread({self.input_stream_key: self.last_id.raw}, block=BLOCK_DELAY)
         if raw_resp:
             resp = (raw_resp)[0][1:]
         else:
@@ -320,7 +341,7 @@ class RedisClient(WorkerBase):
     async def handleTerm(self):
         while not self.stream_wr_queue.empty():
             to_write = await self.processRedisWrQueue(self.stream_wr_queue)
-            await self.fastStreamWrite(to_write)
+            await self.fast_stream_write(to_write)
 
 @dataclass
 class StreamId:
