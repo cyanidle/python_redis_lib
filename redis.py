@@ -1,15 +1,13 @@
 # -*- coding: utf-8 -*-
 from asyncio import coroutines
-from dataclasses import Field, dataclass, field
-from dataclasses import fields as datacls_fields
+from dataclasses import dataclass, field
 import asyncio
 from datetime import datetime
-from functools import lru_cache
 import aioredis
 import logging
 import logging.handlers
 import traceback
-from typing import Dict, List, Tuple, Type, Union
+from typing import Dict, List, Union
 from typing import Any
 from .async_decorators import *
 from .settings import RedisSettings, RedisEntries, SerializableDataclass, flatten_dict, nest_dict
