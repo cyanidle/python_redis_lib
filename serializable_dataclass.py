@@ -11,6 +11,8 @@ from typing_extensions import Self
 
 log = logging.getLogger("serialization")
 
+__all__ = ("MissingRequiredValueError", "SerializableDataclass")
+
 class MissingRequiredValueError(RuntimeError):
     pass
 
