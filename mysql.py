@@ -1,8 +1,11 @@
 from abc import ABC, abstractmethod
+import asyncio
 from dataclasses import dataclass
+import logging
 from typing import Any, Callable, List, Tuple, Union
 from typing_extensions import Self
 import aiomysql
+from pymysql.err import OperationalError
 from .async_decorators import *
 from .supervisor import WorkerBase
 from .settings import SerializableDataclass, SqlClientSettings
@@ -19,6 +22,14 @@ async def sql_handler(coro, *args, **kwargs):
                 if not self._was_run:
                     log.warn(f"Using Sql without calling run() method!")
                 await asyncio.sleep(1)
+        except OperationalError as e:
+            log.error(e)
+            return None
+        except ConnectionRefusedError as e:
+            log.warn(f"Connection refused! Full: {e}")
+            self.connected = False
+            await asyncio.sleep(10)
+            self.ioloop.create_task(self._on_creation())
         except TimeoutError as e:
             log.warn(f"Timeout happened! Full: {e}")
             self.connected = False
@@ -42,7 +53,7 @@ class SqlClient(WorkerBase):
     @connected.setter
     def connected(self,value):
         if self._connected!=value:
-            log.warn(f"Mysql ({self.settings.server.name}) is now connected --> {value}")
+            log.info(f"Mysql ({self.settings.server.name}) is now connected --> {value}")
         self._connected = value
 
 
@@ -60,9 +71,30 @@ class SqlClient(WorkerBase):
         async with self._pool.acquire() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(query)
-                responce = await cur.fetchone()
+                responce = await cur.fetchall()
+                await conn.commit()
+                if responce:
+                    if len(responce) > 1:
+                        log.warn(f"Multiple responces for single execute() call!")
+                    return responce[0]
+                else:
+                    return tuple()
+
+    @async_oneshot
+    @async_handle_exceptions(sql_handler)
+    async def execute_many(self, queries: Union[List[str], str]) -> Tuple[Tuple[Any, ...]]:
+        async with self._pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                if isinstance(queries, list):
+                    for query in queries:
+                        await cur.execute(query)
+                elif isinstance(queries, str):
+                    await cur.execute(queries)
+                else:
+                    raise TypeError("Queries must be 'str' or 'list[str]'")
+                responce = await cur.fetchall()
+                await conn.commit()
                 return responce
-        # TODO: catch relevant errors
 
     @async_oneshot
     async def _on_creation(self):
@@ -71,6 +103,16 @@ class SqlClient(WorkerBase):
                                             user=self.settings.user, password=self.settings.password,
                                             db=self.settings.db, loop=self.ioloop)
             self.connected = True
+        except OperationalError as e:
+            log.error(e)
+            self.connected = False
+            await asyncio.sleep(10)
+            self.ioloop.create_task(self._on_creation())
+        except ConnectionRefusedError as e:
+            log.warn(f"Connection refused! Full: {e}")
+            self.connected = False
+            await asyncio.sleep(10)
+            self.ioloop.create_task(self._on_creation())
         except TimeoutError as e:
             log.warn(f"Timeout happened! Full: {e}")
             self.connected = False
@@ -91,11 +133,9 @@ class _SqlTable:
             return _SelectAction(self, tuple(keys))
     def INSERT(self, *keys: Union[Tuple[str], str]):
         if not keys:
-            raise _InsertAction("Empty INSERT")
+            raise SyntaxError("Empty INSERT")
         else:
             return _InsertAction(self, tuple(keys))
-
-# INSERT INTO polderdata.forecasting (station_id, forecast_param_id, value) VALUES ( {station_id}, 5, {mesh_path_diff} );
 
 class _SqlAction(ABC):
 
@@ -107,7 +147,7 @@ class _SqlAction(ABC):
         return self.exec().__await__()
 
 
-@dataclass
+@dataclass(slots=True)
 class _InsertAction(_SqlAction):
     _parent: _SqlTable
     _keys: Tuple[str]
@@ -123,7 +163,16 @@ class _InsertAction(_SqlAction):
                 raise SyntaxError("More VALUES, than KEYS")
             self._values = self._values[0]
         if self._values:
-            return f"INSERT INTO {self._parent.name} {self._keys} VALUES {self._values}"
+            fields_string = f"({', '.join(self._keys)})"
+            values_string = str('(')
+            for string_value in self._values:
+                if string_value == "NULL":
+                    values_string += "NULL"
+                else:
+                    values_string += f"'{string_value}'"
+                values_string += ', '
+            values_string = values_string[:-2] + ')'
+            return f"INSERT INTO {self._parent.name} {fields_string} VALUES {values_string}"
         else:
             raise SyntaxError("No VALUES in INSERT!")
 
@@ -135,33 +184,34 @@ class _InsertAction(_SqlAction):
         if self._has_values:
             raise SyntaxError("VALUES already called!")
         self._has_values = True
-        self._values = values
+        self._values: Tuple[str] = values
         return self
 
-@dataclass
+@dataclass(slots=True)
 class _SelectAction(_SqlAction):
     _parent: _SqlTable
     _keys: Tuple[str]
     _where: bool = False
     _where_args: str = ""
     _order_by: str = ""
+    _limit: str = ""
 
     def _prepare(self) -> str:
         if len(self._keys) == 1:
             self._keys = self._keys[0]
-        if self._order_by:
-            self._order_by = f"ORDER BY {self._order_by}"
-        return f"SELECT {self._keys} FROM {self._parent.name}{self._format_where}{self._format_order_by}"
+        return f"SELECT {self._keys} FROM {self._parent.name}{self._format_where}{self._format_order_by}{self._format_limit}"
         
     async def exec(self) -> Tuple[Any, ...]:
         # TODO: parse results in meaningful way
-        result = await self._parent._parent.execute(self._prepare())
-        if result is None:
-            return None
-        if type(self._keys) is str:
-            return result[0]
-        else:
-            return result
+        query = self._prepare()
+        result = await self._parent._parent.execute(query)
+        return result
+
+    async def exec_many(self) -> Tuple[Tuple[Any, ...]]:
+        # TODO: parse results in meaningful way
+        query = self._prepare()
+        result = await self._parent._parent.execute_many(query)
+        return result
 
     @property
     def _format_order_by(self):
@@ -176,6 +226,32 @@ class _SelectAction(_SqlAction):
             return f" WHERE {self._where_args}"
         else:
             return ""
+
+    @property
+    def _format_limit(self):
+        if self._limit:
+            return f" LIMIT {self._limit}"
+        else:
+            return ""
+
+    def IN(self, condtition: Union[Self, str]):
+        if not self._where:
+            raise SyntaxError(f"IN used before WHERE!")
+        if isinstance(condtition, _SelectAction):
+            self._where_args += f" IN ({condtition._prepare()})"
+        elif isinstance(condtition, str):
+            self._where_args += f" IN ({condtition})"
+        else:
+            raise SyntaxError(f"Unsupported operand for IN: '{condtition}'")
+        return self
+
+    def LIMIT(self, condition:Union[str, int]):
+        if not isinstance(condition, (int, str)):
+            raise SyntaxError(f"Unsupported condition for LIMIT operator")
+        if not condition:
+            raise SyntaxError("Empty conditions!")
+        self._limit = str(condition)
+        return self
 
     def WHERE(self, conditions:str) -> Self:
         if self._where:

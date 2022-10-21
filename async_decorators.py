@@ -1,11 +1,14 @@
 # -*- coding: utf-8 -*-
-from asyncio import coroutines
+from asyncio import coroutines, iscoroutinefunction
 import functools
 import logging
 import traceback
 import asyncio
+from typing import Awaitable, Callable, ParamSpec, TypeVar
 
 _async_decorators_log = logging.getLogger("async-decorators")
+
+__all__ = ("LoopContinue", "LoopReturn", "LoopSleep", "async_oneshot", "async_repeating_task", "async_handle_exceptions")
 
 class _ReapeatingControlExceptions(Exception):
     """(async_repeating_task) Base class for repeating task control Exceptions"""
@@ -32,7 +35,12 @@ class LoopSleep(_ReapeatingControlExceptions):
         self.seconds = seconds
         super().__init__(*args)
 
-def async_oneshot(func = None, *, logger:logging.Logger = _async_decorators_log, on_shutdown = None):
+_Returns = TypeVar('_Returns')
+_Params = ParamSpec('_Params')
+
+def async_oneshot(func:Callable[_Params, Awaitable[_Returns]] = None, *,
+     logger:logging.Logger = _async_decorators_log, on_shutdown = None) -> \
+         Callable[_Params, Awaitable[_Returns]]:
     """
     This decorator handles exceptions for a coroutine, which is meant to run once
     --\n
@@ -43,7 +51,10 @@ def async_oneshot(func = None, *, logger:logging.Logger = _async_decorators_log,
     logger: override logger with one from source moudle
     on_shutdown: coroutine or plain callback which is run on fail
     """
-    def _async_oneshot(func):
+    def _async_oneshot(func:Callable[_Params, Awaitable[_Returns]]) -> \
+         Callable[_Params, Awaitable[_Returns]]:
+        if not iscoroutinefunction(func):
+            raise TypeError(f"Cannot decorate non-async function: {func.__name__}")
         async def shutdownHook():
             if on_shutdown is None:
                 pass
@@ -52,7 +63,7 @@ def async_oneshot(func = None, *, logger:logging.Logger = _async_decorators_log,
                 if coroutines.iscoroutine(coro):
                     await coro
         @functools.wraps(func)
-        async def oneshot_wrapper(*args, **kwargs):
+        async def oneshot_wrapper(*args, **kwargs) -> _Returns:
             try:
                 return await func(*args, **kwargs)
             except KeyboardInterrupt:
@@ -64,7 +75,7 @@ def async_oneshot(func = None, *, logger:logging.Logger = _async_decorators_log,
                 if isinstance(e, _ReapeatingControlExceptions):
                     logger.error(f"({func.__name__}) Exceptions for controlling @async_repeating_task should not be passed to @async_oneshot!")
                 else:
-                    logger.error(f"({func.__name__}) Unexpected error occured:")
+                    logger.error(f"(Oneshot: {func.__name__}()) Unexpected error occured:")
                     logger.error(traceback.format_exc())
                     await shutdownHook()                    
                     raise e
@@ -73,7 +84,9 @@ def async_oneshot(func = None, *, logger:logging.Logger = _async_decorators_log,
         return _async_oneshot
     return _async_oneshot(func)
 
-def async_repeating_task(func = None, *, delay:float = 0, on_shutdown = None, logger = _async_decorators_log):
+def async_repeating_task(func:Callable[_Params, Awaitable[_Returns]] = None, *,
+     delay:float = 0, on_shutdown = None, logger = _async_decorators_log) -> \
+        Callable[_Params, Awaitable[_Returns]]:
     """
     This decorator handles exceptions for a coroutine, which is meant to run infinitely
     --\n
@@ -83,7 +96,10 @@ def async_repeating_task(func = None, *, delay:float = 0, on_shutdown = None, lo
     logger: override logger with one from source moudle
     on_shutdown: coroutine or plain callback which is run on fail
     """
-    def _async_repeating_task(func):
+    def _async_repeating_task(func:Callable[_Params, Awaitable[_Returns]]) -> \
+        Callable[_Params, Awaitable[_Returns]]:
+        if not iscoroutinefunction(func):
+            raise TypeError(f"Cannot decorate non-async function: {func.__name__}")
         async def shutdownHook():
             if on_shutdown is None:
                 pass
@@ -92,7 +108,7 @@ def async_repeating_task(func = None, *, delay:float = 0, on_shutdown = None, lo
                 if coroutines.iscoroutine(coro):
                     await coro              
         @functools.wraps(func)
-        async def repeating_wrapper(*args, **kwargs):
+        async def repeating_wrapper(*args, **kwargs) -> _Returns:
             try:
                 count = 10
                 loop = asyncio.get_running_loop()
@@ -102,9 +118,10 @@ def async_repeating_task(func = None, *, delay:float = 0, on_shutdown = None, lo
                         count -= 1
                         if not count:
                             current = loop.time()
-                            if delay < 0.1 and current - start_time < 0.05 * 10:
-                                logger.warn(f"({func.__name__}) Time between loop iteration in @async_repeating_task is less, than 50 ms!")
-                                logger.warn(f"({func.__name__}) Possibly missing additional asyncio.sleep()")
+                            if current - start_time < 0.05 * 10:
+                                logger.warn(f"(Reapeating task: {func.__name__}()) \
+                                    Time between loop iteration in @async_repeating_task is less, than 50 ms!")
+                                logger.warn(f"(Reapeating task: {func.__name__}()) Possibly missing additional asyncio.sleep()")
                     try:
                         await func(*args, **kwargs)
                         await asyncio.sleep(delay)
@@ -112,7 +129,7 @@ def async_repeating_task(func = None, *, delay:float = 0, on_shutdown = None, lo
                         continue
                     except LoopReturn as e:
                         if e.args:
-                            logger.warn(f"Canceling repeating task {func.__name__}. Reason: {e.args[0] or 'Not Given'}") 
+                            logger.info(f"Canceling repeating task {func.__name__}. Reason: {e.args[0] or 'Not Given'}") 
                         return
                     except LoopSleep as sleep:
                         await asyncio.sleep(sleep.seconds)
@@ -128,7 +145,7 @@ def async_repeating_task(func = None, *, delay:float = 0, on_shutdown = None, lo
                 raise
             except:
                 await shutdownHook()
-                logger.error(f"({func.__name__}) Unexpected error occured:")
+                logger.error(f"(Repeating task: {func.__name__}()) Unexpected error occured:")
                 logger.error(traceback.format_exc())
                 raise
         return repeating_wrapper
@@ -136,7 +153,8 @@ def async_repeating_task(func = None, *, delay:float = 0, on_shutdown = None, lo
         return _async_repeating_task
     return _async_repeating_task(func)
 
-def async_handle_exceptions(handler, *, pass_kwargs = {}):
+def async_handle_exceptions(handler:Callable[[Callable[_Params, Awaitable[_Returns]]], _Returns]) -> \
+    Callable[_Params, Awaitable[_Returns]]:
     """
     Handler is a function, that accepts a coroutine and its *args, **kwargs
     --\n
@@ -144,27 +162,29 @@ def async_handle_exceptions(handler, *, pass_kwargs = {}):
     --\n
     @async_repeating_task(delay = 1)\n
     @async_handle_exceptions(my_handler)\n
-    async def my_task(self, *args):
-        await do_stuff_once_per_second()
+    async def my_task(self, arg0, arg1):
+        await do_stuff_once_per_second(arg0, arg1)
     ----------------------------\n
     Handler should look like:
     --\n
     async def handler(coro, *args, **kwargs):
         while True:
             try:
-                if my_condition(*args):                   <--- You can use passed arguments!
-                    return await coro(*args, **kwargs)    <--- Dont forget 'return'!
+                if my_condition(*args):                   #<--- You can use passed arguments!
+                    return await coro(*args, **kwargs)    #<--- Dont forget 'return'!
                 else:
                     await asyncio.sleep(1)
             except MyException as e:
                 handle_my_error(e)
     """
-    def _async_handle_exceptions(func, *, passed_kwargs = {}):
+    def _async_handle_exceptions(func:Callable[_Params, Awaitable[_Returns]]) -> Callable[_Params, Awaitable[_Returns]]:
+        if not iscoroutinefunction(func):
+            raise TypeError(f"Cannot decorate non-async function: {func.__name__}")
         @functools.wraps(func)
-        async def _exception_handle_impl(*args, **kwargs):
+        async def _exception_handle_impl(*args, **kwargs) -> _Returns:
             try:
                 return await handler(func, *args, **kwargs)
             except:
                 raise
         return _exception_handle_impl
-    return functools.partial(_async_handle_exceptions, passed_kwargs = pass_kwargs)
+    return _async_handle_exceptions

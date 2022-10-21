@@ -7,7 +7,7 @@ import signal
 import sys
 import time
 import traceback
-from typing import List
+from typing import Coroutine, List, Tuple
 
 log = logging.getLogger("supervisor")
 
@@ -38,11 +38,15 @@ class Supervisor:
 
     Needs used 'asyncio.EventLoop' object passed as 'ioloop' argument
     """
-    _was_init = False
-    def __init__(self, *args:object, ioloop: asyncio.AbstractEventLoop) -> None:
-        if self._was_init:
-            log.warn("Only one supervisor should be created!")
-            return
+    Instance = None
+    def __new__(cls, *args:object, ioloop: asyncio.AbstractEventLoop):
+        if not cls.Instance:
+            cls.Instance = super().__new__(cls)
+        else:
+            for obj in args:
+                cls.Instance.registerNew(obj)
+        return cls.Instance
+    def __init__(self, *args:Tuple[WorkerBase], ioloop: asyncio.AbstractEventLoop) -> None:
         self._was_init = True
         self.obj_list: List[WorkerBase] = []
         self.ioloop = ioloop
@@ -89,7 +93,7 @@ class Supervisor:
             task.cancel()
         time.sleep(5)
         self._rerunAll()
-    def registerNew(self, obj):
+    def registerNew(self, obj:WorkerBase):
         if not isinstance(obj, WorkerBase):
             log.warn(f"Worker {obj} is not a subclass of WorkerBase (does not garantee restart methods implementations)!")
         self.obj_list.append(obj)
@@ -97,22 +101,11 @@ class Supervisor:
     def remove(self,obj):
         log.info(f"Removing object '{obj}' from supervising list")
         self.obj_list.remove(obj)
-    def runAll(self):
-        for obj in self.obj_list:
-            try:
-                if hasattr(obj,"run") and callable(getattr(obj, "run")):
-                    log.info(f"Starting {obj}...")
-                    obj.run()
-                else:
-                    log.warn(f"Object {obj} does not have a run() method to be initialised!")
-            except:
-                log.error(f"Could not start supervisor client {obj}, full reason:")
-                log.error(traceback.format_exc())
     def _rerunAll(self):
         for obj in self.obj_list:
             try:
                 if hasattr(obj,"run") and callable(getattr(obj, "run")):
-                    log.info(f"Restarting {obj}...")
+                    log.warn(f"Restarting {obj}...")
                     obj.run()
                 else:
                     log.warn(f"Object {obj} does not have a run() method to be restarted on error!")

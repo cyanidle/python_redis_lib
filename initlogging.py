@@ -13,7 +13,7 @@ def initLogging(caller_file:str, *,  settings: LoggingSettings = LoggingSettings
     Should be called with '__file__' as the first argument and 'module name' as in logging config as second!
     """
     handlers:List[logging.Handler] = []
-    format_str = '%(levelname)-8s %(name)-12s %(lineno)-6s %(message)s'
+    format_str = '%(levelname)-8s %(name)-16s %(lineno)-5s %(message)s'
     if settings.add_timestamp:
         format_str = '%(asctime)-15s ' + format_str
     if settings.enable_function_name:

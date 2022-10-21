@@ -1,14 +1,12 @@
 # -*- coding: utf-8 -*-
 from abc import abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime
 import os
 import traceback
-from types import NoneType
 from typing_extensions import Self
 import toml
 from os import path
-from typing import Any, Callable, Type, Union
+from typing import Any, Callable, Type, TypeVar, Union
 from typing import List
 from typing import Dict
 import logging
@@ -19,6 +17,8 @@ from .serializable_dataclass import MissingRequiredValueError, SerializableDatac
 
 log = logging.getLogger("settings")
 
+T = TypeVar("T")
+
 def parse_time_to_seconds(src:str) -> int:
     """
     Converts "h:m:s" to seconds ("1:1:1" -> 1 * 3600 + 1*60 + 1)
@@ -27,7 +27,7 @@ def parse_time_to_seconds(src:str) -> int:
         split_rate = src.split(":")
         return 3600 * int(split_rate[0]) + 60 * int(split_rate[1]) + int(split_rate[2])
     except:
-        log.warn(f"Unable to parse --> ({src}). Returning 1 hour.")
+        log.error(f"Unable to parse --> ({src}). Returning 1 hour.")
         return 3600
 
 def apply_to_nested_values(src:dict, func):
@@ -90,7 +90,7 @@ class RedisEntries:
         try: 
             return self.stream_id + ':' + key[:key.rindex(':')]
         except ValueError:
-            return self.stream_id + ':' +key
+            return self.stream_id + ':' + key
 
     def items(self, hash_key:str = None):
         result = {}
@@ -129,13 +129,16 @@ class ConnectionSettings(CachedSerialiazable):
     def _name(self) -> str:
         return self.name
 
-@dataclass (slots=True, kw_only=True)
+@dataclass (slots = True, kw_only=True)
 class RedisSettings(SerializableDataclass):
     server: ConnectionSettings
     commands_stream: str = ""
     output_stream: str = ""
     max_pub_length: int = 50000
     max_sub_length: int = 50000 
+    @classmethod
+    def deserialise(cls, src_dict: dict, *, deserialise_rules: Dict[type, Callable[[Any], Any]] = {}, pedantic=True):
+        return super(RedisSettings, cls).deserialise(src_dict, deserialise_rules=deserialise_rules, pedantic=False)
     @property
     def host(self):
         return self.server.host
@@ -151,14 +154,17 @@ class LoggingSettings(SerializableDataclass):
     logfilename:str = "" #empty = do not use
     enable_function_name: bool = False
 
-@dataclass (slots=True, kw_only=True)
+@dataclass(slots = True, kw_only=True)
 class SqlClientSettings(SerializableDataclass):
     server: ConnectionSettings
-    user_env: str
-    password_env: str = ""
+    user_env: str = "MYSQL_USER"
+    password_env: str = "MYSQL_PSK"
     db: str
     user: str = field(init=False)
     password :str = field(init=False)
+    @classmethod
+    def deserialise(cls, src_dict: dict, *, deserialise_rules: Dict[type, Callable[[Any], Any]] = {}, pedantic=True):
+        return super(SqlClientSettings, cls).deserialise(src_dict, deserialise_rules=deserialise_rules, pedantic=False)
     @property
     def host(self):
         return self.server.host
@@ -172,16 +178,25 @@ class SqlClientSettings(SerializableDataclass):
 
 
 def get_env_value(name:str, *, filepath:str = ".env"):
+    text_token = None
+    env_value = os.getenv(name)
     try:
         with open(filepath, "r") as f:
             for line in f.readlines():
                 split_line = line.split("=")    
                 if split_line[0] == name:
-                    text_token = split_line[1]
+                    text_token = split_line[1].strip()
                     break
     except:
-        log.warn(f"Could not load env value {name} from {filepath} file")
-    return os.getenv(name) or text_token
+        log.warn(f"Could not load env value '{name}' from '{filepath}' file.")
+    if env_value:
+        log.info(f"Using ENVIROMENT value for '{name}'")
+    else:
+        log.info(f"Falling back to '{filepath}' for env value '{name}'")
+    result = env_value or text_token
+    if result is None:
+        raise RuntimeError(f"Could not load ENV value with name: '{name}'")
+    return result
 
 class Reader:
     def __init__(self, *, dir = "conf", file = "config.toml") -> None:
@@ -226,7 +241,7 @@ class Reader:
         with open(self.config_path(file),"r") as f:
                 return toml.load(f)
 
-    def parse(self, struct: Type[SerializableDataclass], key:str = None, pedantic = True, **kwargs) -> SerializableDataclass:
+    def parse(self, struct: Type[T], key:str = None, pedantic = True, **kwargs) -> T:
         """
         Used to call on struct class, which contains parse() method.
 
