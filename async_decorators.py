@@ -2,10 +2,17 @@
 from asyncio import coroutines, iscoroutinefunction
 import functools
 import logging
+import sys
 import traceback
 import asyncio
-from typing import Awaitable, Callable, ParamSpec, TypeVar
+from typing import Any, Awaitable, Callable, TypeVar
+if sys.version_info.minor >= 10:
+    from typing import ParamSpec
+    _Params = ParamSpec('_Params')
+else:
+    _Params = ...
 
+_Returns = TypeVar('_Returns')
 _async_decorators_log = logging.getLogger("async-decorators")
 
 __all__ = ("LoopContinue", "LoopReturn", "LoopSleep", "async_oneshot", "async_repeating_task", "async_handle_exceptions")
@@ -34,9 +41,6 @@ class LoopSleep(_ReapeatingControlExceptions):
         """(async_repeating_task) Raise to restart task after delay"""
         self.seconds = seconds
         super().__init__(*args)
-
-_Returns = TypeVar('_Returns')
-_Params = ParamSpec('_Params')
 
 def async_oneshot(func:Callable[_Params, Awaitable[_Returns]] = None, *,
      logger:logging.Logger = _async_decorators_log, on_shutdown = None) -> \

@@ -3,12 +3,16 @@ from datetime import datetime
 from functools import partial
 from inspect import signature
 import logging
+import sys
 from typing import Any, Callable, List, Tuple, Type, Union, get_args, get_origin
 from typing import Dict
 from dataclasses import MISSING, Field, asdict, dataclass, is_dataclass
 from dataclasses import fields as datacls_fields
-from typing_extensions import Self
-
+try:
+    from typing_extensions import Self
+except:
+    Self = object
+    
 log = logging.getLogger("serialization")
 
 __all__ = ("MissingRequiredValueError", "SerializableDataclass")
@@ -16,7 +20,10 @@ __all__ = ("MissingRequiredValueError", "SerializableDataclass")
 class MissingRequiredValueError(RuntimeError):
     pass
 
-@dataclass(slots=True)
+if sys.version_info.minor >= 10:
+    dataclass = dataclass(slots=True)
+
+@dataclass
 class SerializableDataclass:
     @classmethod
     def deserialise(cls, src_dict:dict, *, deserialise_rules: Dict[type, Callable[[Any], Any]] = {}, pedantic = True) -> Self:
